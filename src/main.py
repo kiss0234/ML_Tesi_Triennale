@@ -7,7 +7,7 @@ from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
 from data.study.study_labels import labels_study
-from data.prepdata.prepare_dataset import divide_dataset
+from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 
@@ -38,6 +38,7 @@ def help_study() -> None:
     print("Enter 1 to show target label's graph")
     print("Enter 2 to go to the numerical features' section")
     print("Enter 3 to go to the categorical features' section")
+    print("Enter 4 to drop attacks with under 5000 samples")
     print("Enter q to end the execution")
     print("------------------------------------")
 
@@ -45,7 +46,7 @@ def study_data(input_path: str):
     split = 0
 
     logger.info("Loading data...")
-    df = pd.read_csv(input_path)    
+    df = pd.read_csv(input_path) 
     logger.info(f"Loaded {df.shape[0]} rows")
 
     logger.info("Loading feature types..")
@@ -79,6 +80,11 @@ def study_data(input_path: str):
             case "3":
                 if(split == 1):
                     categorical_features_study(datasets, categorical_features)
+                else:
+                    print("ERROR: Split the dataset first")
+            case "4":
+                if(split==1):
+                    remove_attacks_under_threshold(datasets, 5000)
                 else:
                     print("ERROR: Split the dataset first")
             case "q":
@@ -122,5 +128,5 @@ if __name__ == "__main__":
 
 
 # TODO: Test Scaling/Numeriche/Categoriche
-# TODO: Comparazione distribuzioni attacco per attacco e per dataset completo
-# TODO: caching dati pickle
+# TODO: fare differenza e per diverse grandezze fare input 0
+# TODO: salvare su file csv 

@@ -9,11 +9,13 @@ logger = logging.getLogger(__name__)
 MAX_DATASETS = 5
 
 def remove_attacks_under_threshold(datasets, threshold) -> None:
-    for dataset in datasets.values():
+    for host, dataset in datasets.items():
         attacks = dataset["Attack"].value_counts()
         attacks_under_threshold = attacks[attacks < threshold].index
+        print(f"{host} : {attacks_under_threshold}")
+
         for attack in attacks_under_threshold:
-            dataset.drop(dataset["Attack"] == attack, inplace=True)
+            dataset.drop(dataset[dataset["Attack"] == attack].index, inplace=True)
 
 
 def divide_dataset(df) -> Dict[str, pd.DataFrame]:
@@ -41,7 +43,8 @@ def divide_dataset(df) -> Dict[str, pd.DataFrame]:
     # Codice per mostrare figure traffic rows per single host
     traffic_per_host[:MAX_DATASETS].plot(kind="bar", xlabel="host", ylabel="traffic rows", title="traffic per host")
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.close()
     
     return datasets
 
