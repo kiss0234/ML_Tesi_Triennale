@@ -32,7 +32,7 @@ The `utilities` folder also contains two utility classes and one configuration f
   parser.register_subcommands("command", ["arguments"], ["help"])
   ```
   Then, when executing the main script, specify which function to run along with its parameters:
-  ```bash
+  ```
   python3 src/main.py prepare --input resources/datasets/dataset.csv
   ```
   This runs the `prepare` function with `resources/datasets/dataset.csv` as an input parameter.
@@ -43,7 +43,7 @@ The `utilities` folder also contains two utility classes and one configuration f
 Create and activate a Python virtual environment:
 
 ```bash
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+python3 -m venv venv && source venv/Scripts/activate && pip install -r requirements.txt
 ```
 
 To run the script, use:
