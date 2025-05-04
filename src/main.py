@@ -14,6 +14,7 @@ from data.study.study_categorical import categorical_features_study
 setup_logging()
 logger = logging.getLogger(__name__)
 MAX_SPLIT = 1
+THRESHOLD = 3000
 
 def prepare_data(input_path: str, output_path: str) -> None:
     logger.info("Preparing data...")
@@ -38,7 +39,7 @@ def help_study() -> None:
     print("Enter 1 to show target label's graph")
     print("Enter 2 to go to the numerical features' section")
     print("Enter 3 to go to the categorical features' section")
-    print("Enter 4 to drop attacks with under 5000 samples")
+    print(f"Enter 4 to drop attacks with under {THRESHOLD} samples")
     print("Enter q to end the execution")
     print("------------------------------------")
 
@@ -46,13 +47,15 @@ def study_data(input_path: str):
     split = 0
 
     logger.info("Loading data...")
-    df = pd.read_csv(input_path) 
+    df = pd.read_csv(input_path, nrows=20000) 
     logger.info(f"Loaded {df.shape[0]} rows")
 
     logger.info("Loading feature types..")
     config_manager = ConfigManager()
     config_manager.load_config("config/dataset.json")
     numerical_features = config_manager.get_value("dataset", "numeric_columns")
+    numerical_features.remove("FLOW_START_MILLISECONDS")
+    numerical_features.remove("FLOW_END_MILLISECONDS")
     categorical_features = config_manager.get_value("dataset", "categorical_columns")
     logger.info("Loading complete")
 
@@ -84,7 +87,7 @@ def study_data(input_path: str):
                     print("ERROR: Split the dataset first")
             case "4":
                 if(split==1):
-                    remove_attacks_under_threshold(datasets, 5000)
+                    remove_attacks_under_threshold(datasets, THRESHOLD)
                 else:
                     print("ERROR: Split the dataset first")
             case "q":

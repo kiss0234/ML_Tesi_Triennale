@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import os
 from data.prepdata.prepare_dataset import subdataset_per_feature_categories 
 from typing import Dict, List
+from collections import defaultdict
+from data.study.comparedist.cmpdist import compare_distributions2
 
 logger = logging.getLogger(__name__)
 divided = 0
@@ -29,6 +31,7 @@ def help_categorical_features_study() -> None:
     print("Enter 0 to divide the datasets per attack")
     print("Enter 1 to plot a bar graph for every feature's category")
     print("Enter 2 to go back to the given datasets")
+    print("Enter 3 to compare distributions")
     print("Enter q to leave this section")
 
 def categorical_features_study(datasets : Dict[str, pd.DataFrame], categorical_features : List[str]) -> None:
@@ -51,7 +54,24 @@ def categorical_features_study(datasets : Dict[str, pd.DataFrame], categorical_f
                 feature_categories(datasets, categorical_features)
             case "2":
                 datasets = givenDatasets
+            case "3":
+                if(divided):
+                    grouped_dicts = defaultdict(dict)
+
+                    # Dividi il dict in sotto dict contenenti datasets relativi allo stesso attacco
+                    for name, df in datasets.items():
+                        group_key = name.split('_')[-1] # La notazione della chiave è "host_attacco"
+                        grouped_dicts[group_key][name] = df
+                    
+                    for attack, group in grouped_dicts.items():
+                        print(f"Group: {attack}")
+                        compare_distributions2(group, categorical_features, attack)
+                        # plot_feature_over_time(group, numerical_feature)
+                else:
+                    compare_distributions2(datasets, categorical_features)
+                    # plot_feature_over_time(datasets, numerical_feature)
             case "q":
+                divided = 0
                 break
             case _:
                 print("WRONG INPUT")

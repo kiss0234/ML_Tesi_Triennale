@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import os
-from data.study.comparedist.cmpdist import  compare_distributions2, plot_feature_prob_dist, compare_plots
+from data.study.comparedist.cmpdist import  compare_distributions2, plot_feature_prob_dist, compare_plots, binning
 from typing import List, Dict
 from data.prepdata.prepare_dataset import scale_features, subdataset_per_feature_categories
 from collections import defaultdict
@@ -126,6 +126,7 @@ def help_numerical_features_study() -> None:
     print("Enter 5 to show the already computed infos")
     print("Enter 6 to compare distributions")
     print("Enter 7 to plot feature probability distributions")
+    print("Enter 8 to bucketize the normalized datasets")
     print("Enter q to quit")
 
 # Funzione per lo studio delle feature numeriche
@@ -201,11 +202,21 @@ def numerical_features_study(datasets: Dict[str, pd.DataFrame], numerical_featur
                     compare_plots(datasets, numerical_features)
                 else:
                     print("ERROR: Normalize the datasets first")
-
+            case "8":
+                if(normalized):
+                    buckets = int(input("Inserisci numero di buckets: "))
+                    datasets = binning(datasets, buckets)
+                else:
+                    print("ERROR: Normalize the dataset first")
             case "q":
+                divided = 0
+                normalized = 0
                 break
             case _:
                 print("WRONG INPUT")
 
         help_numerical_features_study()
         userInput = input("->")
+
+
+# TODO: media, std, somma dei valori assoluti delle differenze.

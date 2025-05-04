@@ -65,18 +65,19 @@ def compare_distributions(datasets : Dict[str, pd.DataFrame], numerical_features
         print(f"\nFeature: {feature}")
         print(cmp_df, end="\n")
 
-def compare_distributions2(datasets : Dict[str, pd.DataFrame], numerical_features, attack = None):
-    numerical_features = numerical_features.copy()
-    numerical_features.remove("FLOW_START_MILLISECONDS")
-    numerical_features.remove("FLOW_END_MILLISECONDS")
+def compare_distributions2(datasets : Dict[str, pd.DataFrame], feature_names, attack = None):
+    print(feature_names)
 
     fpath = f"resources/csvs"
     if(attack != None):
         fpath = os.path.join(fpath, f"attacks/{attack}")
+        print("---------------------------------------------------------")
+        print(f"                       {attack}")
+        print("---------------------------------------------------------")
     else:
         fpath = os.path.join(fpath, "normal")
 
-    for feature in numerical_features:
+    for feature in feature_names:
         dist_prob_dict = {} # Qui finiscono tutte le distribuzioni di probabilità
         newfpath = os.path.join(fpath, f"{feature}")
          
@@ -87,7 +88,7 @@ def compare_distributions2(datasets : Dict[str, pd.DataFrame], numerical_feature
             prob = round((dataset[feature].value_counts(normalize=True) * 100), 3)
             dist_prob_dict[host] = prob
 
-        # Lista di liste di tutte i valori della feature tra tutti i dataset
+        # Lista di liste di tutti i valori della feature tra tutti i dataset
         values = [dist_prob.index for dist_prob in dist_prob_dict.values()]
 
         # Tutti i valori in ordine decrescente
@@ -101,21 +102,25 @@ def compare_distributions2(datasets : Dict[str, pd.DataFrame], numerical_feature
         # Ci sono dataset che non hanno alcuni valori, si assume probabilità 0
         prob_df = prob_df.fillna(0)
                     
-        print(f"Feature: {feature}")
-        print("Probability of occurrency")
-        print(prob_df, end="\n")
+        print(f"Feature: {feature}", end="\n")
+        # print("Probability of occurrency")
+        # print(prob_df, end="\n")
         
         for host1 in prob_df.columns:
-            differences_df = pd.DataFrame(index=prob_df.index)
+            differences_df = pd.DataFrame(index=["std", "mean", "sum"])
             for host2 in prob_df.columns:
                 if(host1 != host2):
-                    differences_df[host2] = prob_df[host1] - prob_df[host2]
-            
+                    difference = abs(prob_df[host1] - prob_df[host2])
+                    difference_infos = {"sum" : difference.sum(),
+                                        "std" : difference.std(),
+                                        "mean" : difference.mean()}
+                    differences_df[host2] = difference_infos
+
             filename = os.path.join(newfpath, f"{host1}.csv")
             differences_df.to_csv(filename)
             print("------------------------------------------------------------------------------------")
-            print(f"Differences between {host1} and the others: ")
-            print(differences_df)
+            print(f"Difference infos between {host1} and the others: ")
+            print(differences_df.T)
             print("------------------------------------------------------------------------------------")
         
         print("\n\n\n\n\n\n\n\n")
@@ -201,3 +206,15 @@ def compare_plots(datasets : Dict[str, pd.DataFrame], numerical_features : List[
                     plt.savefig(filename)
                     plt.close()
                         
+
+def binning(datasets : Dict[str, pd.DataFrame], buckets):
+    logger.info("Binning")
+    bin_labels = list(range(buckets))
+    df_dict = {}
+    for host, dataset in datasets.items():
+        df = pd.DataFrame()
+        for feature in dataset.columns:
+            df[feature] = pd.cut(dataset[feature], bins=(np.linspace(0, 1, buckets+1)), right=True, include_lowest=True, labels=bin_labels)
+        df_dict[host] = df
+    logger.info("Done")
+    return df_dict
