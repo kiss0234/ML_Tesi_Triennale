@@ -37,3 +37,8 @@ class LogMinMaxScaler(BaseEstimator, TransformerMixin):
 
     def fit_transform(self, X: ArrayLike, y: Optional[ArrayLike] = None) -> np.ndarray:
         return self.fit(X, y).transform(X)
+    
+    def get_feature_names_out(self, input_features=None):
+        if input_features is None:
+            input_features = []
+        return np.array(input_features)

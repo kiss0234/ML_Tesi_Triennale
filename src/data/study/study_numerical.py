@@ -4,9 +4,10 @@ import pandas as pd
 import numpy as np
 import pickle
 import os
-from data.study.comparedist.cmpdist import  compare_distributions2, plot_feature_prob_dist, compare_plots, binning
+from data.study.comparedist.cmpdist import  compare_distributions2, plot_feature_prob_dist, compare_plots
 from typing import List, Dict
 from data.prepdata.prepare_dataset import scale_features, subdataset_per_feature_categories
+from data.prepdata.binning import binning
 from collections import defaultdict
 
 divided = 0
@@ -118,9 +119,9 @@ def show_computed_infos():
         userInput = input("->")
 
 def help_numerical_features_study() -> None:
-    print("\nEnter 0 to divide the datasets per attack")
-    print("Enter 1 to normalize the given features")
-    print("Enter 2 to go back to the given datasets")
+    print("Enter 0 to go back to the given datasets")
+    print("Enter 1 to divide the datasets per attack")
+    print("Enter 2 to normalize the given features")
     print("Enter 3 to show feature infos for all datasets")
     print("Enter 4 to plot the frequency distributions")
     print("Enter 5 to show the already computed infos")
@@ -140,24 +141,24 @@ def numerical_features_study(datasets: Dict[str, pd.DataFrame], numerical_featur
     while(True):
         match userInput:
             case "0":
-                if(not divided):
+                divided = 0
+                normalized = 0
+                datasets = givenDatasets
+                logger.info("Done")
+            case "1":
+                if(divided):
+                    print("ERROR: You can't divide the dataset more than once")
+                elif(normalized):
+                    print("ERROR: You can't divide the dataset after normalizing")
+                else:
                     datasets = subdataset_per_feature_categories(datasets, feature="Attack")
                     divided = 1
-                else:
-                    print("ERROR: You can't divide the dataset more than once")
-            case "1":
+            case "2":
                 if(not normalized):
                     datasets = scale_features(datasets, numerical_features)
                     normalized = 1
                 else:
                     print("ERROR: You can't normalize the dataset again")
-
-            case "2":
-                divided = 0
-                normalized = 0
-                datasets = givenDatasets
-                logger.info("Done")
-
             case "3":
                 features_infos(datasets, numerical_features)
             case "4":
@@ -165,7 +166,7 @@ def numerical_features_study(datasets: Dict[str, pd.DataFrame], numerical_featur
             case "5":
                 show_computed_infos()
 
-            case "6": 
+            case "6":  
                 if(divided and normalized):
                     grouped_dicts = defaultdict(dict)
 
@@ -205,7 +206,7 @@ def numerical_features_study(datasets: Dict[str, pd.DataFrame], numerical_featur
             case "8":
                 if(normalized):
                     buckets = int(input("Inserisci numero di buckets: "))
-                    datasets = binning(datasets, buckets)
+                    datasets = binning(datasets, buckets, numerical_features)
                 else:
                     print("ERROR: Normalize the dataset first")
             case "q":
@@ -217,6 +218,3 @@ def numerical_features_study(datasets: Dict[str, pd.DataFrame], numerical_featur
 
         help_numerical_features_study()
         userInput = input("->")
-
-
-# TODO: media, std, somma dei valori assoluti delle differenze.

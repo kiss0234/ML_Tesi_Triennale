@@ -3,6 +3,7 @@ import logging
 
 import pandas as pd
 
+from utilities.memoryusage import print_memory_usage
 from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
@@ -10,6 +11,7 @@ from data.study.study_labels import labels_study
 from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
+from data.study.study_cat_num import categorical_numerical_features_study
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -37,9 +39,10 @@ def help_study() -> None:
     print("------------------------------------")
     print("Enter 0 to divide dataset per host")
     print("Enter 1 to show target label's graph")
-    print("Enter 2 to go to the numerical features' section")
-    print("Enter 3 to go to the categorical features' section")
-    print(f"Enter 4 to drop attacks with under {THRESHOLD} samples")
+    print("Enter 2 to go to the numerical features section")
+    print("Enter 3 to go to the categorical features section")
+    print("Enter 4 to go to the all features section")
+    print(f"Enter 5 to drop attacks with under {THRESHOLD} samples")
     print("Enter q to end the execution")
     print("------------------------------------")
 
@@ -47,7 +50,7 @@ def study_data(input_path: str):
     split = 0
 
     logger.info("Loading data...")
-    df = pd.read_csv(input_path, nrows=20000) 
+    df = pd.read_csv(input_path) 
     logger.info(f"Loaded {df.shape[0]} rows")
 
     logger.info("Loading feature types..")
@@ -59,6 +62,7 @@ def study_data(input_path: str):
     categorical_features = config_manager.get_value("dataset", "categorical_columns")
     logger.info("Loading complete")
 
+    print_memory_usage()
     datasets = {}
     help_study()
     userInput = input("->")
@@ -68,6 +72,7 @@ def study_data(input_path: str):
                 if(split != MAX_SPLIT):
                     datasets = divide_dataset(df)
                     split = split + 1
+                    del df
                 else:
                     print("ERROR: You can't split more than one time")
             case "1":
@@ -86,6 +91,11 @@ def study_data(input_path: str):
                 else:
                     print("ERROR: Split the dataset first")
             case "4":
+                if(split == 1):
+                    categorical_numerical_features_study(datasets, categorical_features, numerical_features)
+                else:
+                    print("ERROR: Split the dataset first")
+            case "5":
                 if(split==1):
                     remove_attacks_under_threshold(datasets, THRESHOLD)
                 else:
@@ -94,6 +104,7 @@ def study_data(input_path: str):
                 break
             case _:
                 print("WRONG INPUT")
+        print_memory_usage()
         help_study()
         userInput = input("->")
 
@@ -126,10 +137,4 @@ if __name__ == "__main__":
         prepare_data(args.input, args.output)
 
     elif args.subcommand == "study":
-        study_data(args.input)
-
-
-
-# TODO: Test Scaling/Numeriche/Categoriche
-# TODO: fare differenza e per diverse grandezze fare input 0
-# TODO: salvare su file csv 
+        study_data(args.input) 

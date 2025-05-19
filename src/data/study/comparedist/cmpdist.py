@@ -159,9 +159,6 @@ def plot_feature_prob_dist(datasets : Dict[str, pd.DataFrame], numerical_feature
     print(f"All figures saved in {fpath}")
 
 def compare_plots(datasets : Dict[str, pd.DataFrame], numerical_features : List[str], attack = None):
-    numerical_features = numerical_features.copy()
-    numerical_features.remove("FLOW_START_MILLISECONDS")
-    numerical_features.remove("FLOW_END_MILLISECONDS")
     for feature in numerical_features:
         if(attack != None):
             fpath = f"graphs/hostsProva/dist/{attack}/compare/{feature}"
@@ -206,15 +203,36 @@ def compare_plots(datasets : Dict[str, pd.DataFrame], numerical_features : List[
                     plt.savefig(filename)
                     plt.close()
                         
+def compare_distributions_all_features(datasets : Dict[str, pd.DataFrame], features : List[str], attack=None):
+    table = {} # Tabella Host x Host
 
-def binning(datasets : Dict[str, pd.DataFrame], buckets):
-    logger.info("Binning")
-    bin_labels = list(range(buckets))
-    df_dict = {}
-    for host, dataset in datasets.items():
-        df = pd.DataFrame()
-        for feature in dataset.columns:
-            df[feature] = pd.cut(dataset[feature], bins=(np.linspace(0, 1, buckets+1)), right=True, include_lowest=True, labels=bin_labels)
-        df_dict[host] = df
-    logger.info("Done")
-    return df_dict
+    keys = list(datasets.keys()) # Chiavi del dict
+    for i in range(len(keys)): # Prendo un Host1
+        all_sums = {}
+        df1 = datasets[keys[i]]
+        for j in range(i+1, len(keys)): # Comparo l'Host1 con tutti gli host successivi
+            acc = 0 # Totale somme
+            df2 = datasets[keys[j]]
+
+            #Per tutte le feature faccio somma della differenza assoluta della "distribuzione"
+            for feature in features:
+                vc1 = df1[feature].value_counts(normalize=True)
+                vc2 = df2[feature].value_counts(normalize=True)
+                all_values = set(vc1.index).union(vc2.index)
+                vc1 = vc1.reindex(all_values, fill_value=0)
+                vc2 = vc2.reindex(all_values, fill_value=0)
+                differences = abs(vc1 - vc2) * 100
+                acc += differences.sum()
+
+            all_sums[keys[j]] = acc
+            # logger.info(f"Done {keys[i]} vs {keys[j]}")
+        table[keys[i]] = all_sums
+    
+    table = pd.DataFrame(data=table, index=keys, columns=keys)
+    table.fillna(0, inplace=True)
+    
+    if attack != None:
+        print("---------------------------------------------------------")
+        print(f"                       {attack}")
+        print("---------------------------------------------------------")
+    print(table, end="\n\n\n")

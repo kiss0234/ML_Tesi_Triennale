@@ -1,5 +1,7 @@
 import logging
 import pandas as pd
+import numpy as np
+import os
 import matplotlib.pyplot as plt
 from typing import List, Dict
 from data.scalers.LogMinMaxScaler import LogMinMaxScaler
@@ -19,6 +21,7 @@ def remove_attacks_under_threshold(datasets, threshold) -> None:
 
 
 def divide_dataset(df) -> Dict[str, pd.DataFrame]:
+
     #Identifico il numero di righe per traffico inviato per host
     rows_per_src_host = df["IPV4_SRC_ADDR"].value_counts()
 
@@ -33,7 +36,7 @@ def divide_dataset(df) -> Dict[str, pd.DataFrame]:
 
     datasets = {}
     for host in traffic_per_host.index[:MAX_DATASETS]:
-        datasets[host] = df[df["IPV4_SRC_ADDR"].isin([host]) | df["IPV4_DST_ADDR"].isin([host])].copy()
+        datasets[host] = df[df["IPV4_SRC_ADDR"].isin([host]) | df["IPV4_DST_ADDR"].isin([host])]
     logger.info("Created 5 datasets")
 
     # Stampa grandezza dataset
@@ -49,16 +52,32 @@ def divide_dataset(df) -> Dict[str, pd.DataFrame]:
     return datasets
 
 # Ritorna dict di df normalizzati con std scaler (x-u)/std
-def scale_features(datasets, numerical_features_names) -> Dict[str, pd.DataFrame]:
+def scale_features(datasets : Dict[str, pd.DataFrame], numerical_features_names) -> Dict[str, pd.DataFrame]:
     logger.info("Normalizing..")
-    scaler = LogMinMaxScaler()
-    column_transformer = ColumnTransformer(transformers=[("normalize", scaler, numerical_features_names)])
-    
-    # Creo dict con chiave host e value ndarray dim 2 transformato
-    datasetsScaled = {host : column_transformer.fit_transform(dataset) for host, dataset in datasets.items()}
 
-    # Trasformo gli ndarray in dataframes
-    datasetsScaled = {host : pd.DataFrame(data=datasetScaled, columns=numerical_features_names) for host, datasetScaled in datasetsScaled.items()}
+    scaler = LogMinMaxScaler()
+    column_transformer = ColumnTransformer(
+        transformers=[("normalize", scaler, numerical_features_names)], remainder="passthrough")
+
+    datasetsScaled = {}
+
+    for host, dataset in datasets.items():
+
+        # Fit e transform sul dataset
+        transformed_ndarray = column_transformer.fit_transform(dataset)
+    
+        # Nomi corretti nell'ordine giusto
+        features = [name.split('__')[-1] for name in column_transformer.get_feature_names_out()]
+
+        df = pd.DataFrame(data=transformed_ndarray, columns=features)
+
+        # Fai downcast solamente di quelle numeriche, inizialmente sono float 64 dopo float 32
+        for col in numerical_features_names:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], downcast="float")
+
+        datasetsScaled[host] = df
+        logger.info(f"{host} done")
     logger.info("Done")
     return datasetsScaled
 
