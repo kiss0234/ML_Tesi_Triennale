@@ -2,7 +2,14 @@ import sys
 import logging
 
 import pandas as pd
-
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from data.scalers.LogMinMaxScaler import LogMinMaxScaler
+from data.scalers.custom_binner import CustomBinner
+from data.scalers.custom_imputer import CustomImputer
+from data.scalers.frequency_encoder import FrequencyEncoder
+from sklearn.model_selection import train_test_split
 from utilities.memoryusage import print_memory_usage
 from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
@@ -21,7 +28,7 @@ THRESHOLD = 3000
 def prepare_data(input_path: str, output_path: str) -> None:
     logger.info("Preparing data...")
 
-    df = pd.read_csv(input_path, nrows=10000)
+    df = pd.read_csv(input_path, nrows=100000)
 
     logger.info(f"Loaded {df.shape[0]} rows")
 
@@ -32,8 +39,50 @@ def prepare_data(input_path: str, output_path: str) -> None:
     config_manager.load_config("config/dataset.json")
     numerical_columns = config_manager.get_value("dataset", "numeric_columns")
     categorical_columns = config_manager.get_value("dataset", "categorical_columns")
+    target_column = config_manager.get_value("dataset", "target_column")
 
     logger.info("Loading complete")
+
+    logger.info("Preprocessing...")
+    # Pipeline per numeriche
+    num_pipeline = Pipeline([
+        ("Impute", CustomImputer()),
+        ("Binning", CustomBinner()),
+        ("Scaling", LogMinMaxScaler())
+    ])
+
+    # Pipeline per categoriche
+    cat_pipeline = Pipeline([
+        ("FrequencyEncoder", FrequencyEncoder(soglia=0.5)),
+        ("1hot", OneHotEncoder(sparse_output = False)),
+    ])
+
+    # Numeriche passano per pipeline numerica, categoriche per pipeline categorica
+    preprocessing = ColumnTransformer([
+        ("num", num_pipeline, numerical_columns),
+        ("cat", cat_pipeline, categorical_columns),
+    ])
+
+    array_preprocessed = preprocessing.fit_transform(df)
+
+    one_hot_column_names = preprocessing.named_transformers_["cat"].named_steps["1hot"].get_feature_names_out(categorical_columns)
+
+    all_columns = numerical_columns + list(one_hot_column_names)
+
+    df_preprocessed = pd.DataFrame(data=array_preprocessed, columns=all_columns)
+
+    df_preprocessed[target_column] = df[target_column]
+
+    train_ratio = 0.8
+
+    train_df, test_df = train_test_split(df_preprocessed, test_size=(1-train_ratio), random_state=None)
+
+    if output_path != None:
+        train_df.to_csv(output_path + "_train.csv", index=False)
+        test_df.to_csv(output_path + "_test.csv", index=False)
+        
+    logger.info("Preprocessed and saved correctly")
+
 
 def help_study() -> None:
     print("------------------------------------")
@@ -119,7 +168,7 @@ if __name__ == "__main__":
             "The input path for the data.",
             "The output path for the prepared data.",
         ],
-        defaults=["resources/datasets/dataset.csv", None],
+        defaults=["resources/datasets/dataset.csv", "resources/datasets"],
     )
 
     parser.register_subcommand(
