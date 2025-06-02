@@ -1,7 +1,7 @@
 import logging
 import pandas as pd 
 import numpy as np
-from data.study.comparedist.cmpdist import  compare_distributions_all_features
+from data.study.comparedist.cmpdist import  compare_distributions_all_features, plot_tables, plot_total_table
 from typing import List, Dict
 from data.prepdata.prepare_dataset import scale_features, subdataset_per_feature_categories
 from data.prepdata.binning import binning
@@ -17,7 +17,8 @@ def help_study() -> None:
     print("Enter 1 to divide the datasets per attack")
     print("Enter 2 to normalize the numerical features")
     print("Enter 3 to bucketize the normalized datasets")
-    print("Enter 4 to compare distributions")
+    print("Enter 4 to generate a comparison table of distributions across hosts and/or attack types")
+    print("Enter 5 to compare values from each table in a bar plot")
     print("Enter q to quit")
 
 # Funzione per lo studio delle feature numeriche
@@ -70,14 +71,19 @@ def categorical_numerical_features_study(datasets: Dict[str, pd.DataFrame], cate
                     
                     for attack, group in grouped_dicts.items():
                         print(f"Group: {attack}")
-                        compare_distributions_all_features(group, (categorical_features+numerical_features), attack)
+                        compare_tables[attack] = compare_distributions_all_features(group, (categorical_features+numerical_features), attack)
                         
 
                 elif(normalized):
-                    compare_distributions_all_features(datasets, (categorical_features+numerical_features))
+                    compare_tables["general"] = compare_distributions_all_features(datasets, (categorical_features+numerical_features))
                 else:
                     print("ERROR: Normalize the datasets first")
-
+            case "5":
+                if (len(compare_tables) <= 1) or ("general" not in compare_tables):
+                    print("ERROR: Generate all the tables first (both attack-specific and general) before plotting")
+                else:
+                    plot_tables(compare_tables)
+                    plot_total_table(compare_tables)
             case "q":
                 divided = 0
                 normalized = 0

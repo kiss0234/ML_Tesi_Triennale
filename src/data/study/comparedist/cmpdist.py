@@ -3,8 +3,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List
 import matplotlib.pyplot as plt
-from scipy.stats import gaussian_kde, entropy
+from scipy.stats import gaussian_kde, entropy, wasserstein_distance
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -218,11 +219,27 @@ def compare_distributions_all_features(datasets : Dict[str, pd.DataFrame], featu
             for feature in features:
                 vc1 = df1[feature].value_counts(normalize=True)
                 vc2 = df2[feature].value_counts(normalize=True)
+
+                # Ricavo tutti i valori
                 all_values = set(vc1.index).union(vc2.index)
-                vc1 = vc1.reindex(all_values, fill_value=0)
-                vc2 = vc2.reindex(all_values, fill_value=0)
-                differences = abs(vc1 - vc2) * 100
-                acc += differences.sum()
+
+                # Le due serie devono avere stesso indice
+                vc1 = vc1.reindex(all_values, fill_value=0) + 1e-10
+                vc2 = vc2.reindex(all_values, fill_value=0) + 1e-10
+
+                # Mi assicuro che siano ordinati allo stesso modo
+                vc1 = vc1.sort_index() 
+                vc2 = vc2.sort_index()
+
+                x = np.array(vc1.index) # all values 
+                P = np.array(vc1.values) # host1 prob
+                Q = np.array(vc2.values) # host2 prob
+
+                # differences = abs(vc1 - vc2) * 100
+                # acc += differences.sum()
+
+                acc += wasserstein_distance(x,x,P,Q)
+
 
             all_sums[keys[j]] = acc
             # logger.info(f"Done {keys[i]} vs {keys[j]}")
@@ -236,3 +253,60 @@ def compare_distributions_all_features(datasets : Dict[str, pd.DataFrame], featu
         print(f"                       {attack}")
         print("---------------------------------------------------------")
     print(table, end="\n\n\n")
+
+    return table
+
+def plot_tables(tables : Dict[str, pd.DataFrame]):
+    base_table = tables["general"]
+
+    fpath = "graphs/compare_dist"
+    if not os.path.exists(fpath):
+        os.makedirs(fpath, exist_ok=True)
+
+    keys = base_table.columns
+    for i in range(len(keys)):
+        host1 = keys[i]
+        for j in range(i+1, len(keys)):
+            host2 = keys[j]
+            # Inizializzazione grafico
+            fig, ax = plt.subplots()
+            ax.set_title(f"{host1}vs{host2}", pad=20)
+            ax.set_xlabel("Category", labelpad=10)
+            ax.set_ylabel("Difference value")
+
+            # Creazione path dove verrà salvato il grafico
+            filepath = os.path.join(fpath, f"{host1}vs{host2}.jpg")
+            for category, table in tables.items():
+                if(category != "general"):
+                    current_host1 = host1 + "_" + category
+                    current_host2 = host2 + "_" + category
+                else:
+                    current_host1 = host1
+                    current_host2 = host2
+                try:
+                    value = table.loc[current_host2, current_host1]
+                    ax.bar(category, value)
+                except Exception as e:
+                    pass
+            plt.tight_layout()
+            plt.savefig(filepath)
+            plt.close(fig)
+
+def plot_total_table(tables : Dict[str, pd.DataFrame]):
+    fpath = "graphs/compare_dist"
+    if not os.path.exists(fpath):
+        os.makedirs(fpath, exist_ok=True)
+
+    fig, ax = plt.subplots()
+    ax.set_title(f"Total Wasserstein Distance per Category", pad=20)
+    ax.set_xlabel("Category", labelpad=10)
+    ax.set_ylabel("Wasserstein distance")
+
+    for category, table in tables.items():
+        value = table.values.sum()
+        ax.bar(category, value)
+
+    filepath = os.path.join(fpath, f"totalwasserstein.jpg")
+    plt.tight_layout()
+    plt.savefig(filepath)
+    plt.close(fig)
