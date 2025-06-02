@@ -1,5 +1,7 @@
 import sys
 import logging
+import torch
+from data.CSVDataset import CSVDataset
 
 import pandas as pd
 from sklearn.pipeline import Pipeline
@@ -19,6 +21,7 @@ from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_t
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 from data.study.study_cat_num import categorical_numerical_features_study
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -80,8 +83,13 @@ def prepare_data(input_path: str, output_path: str) -> None:
     if output_path != None:
         train_df.to_csv(output_path + "_train.csv", index=False)
         test_df.to_csv(output_path + "_test.csv", index=False)
-        
+
     logger.info("Preprocessed and saved correctly")
+
+
+def train_model(input_path: str, out_path_model: str) -> None:
+    train_data = CSVDataset(input_path)
+    pass
 
 
 def help_study() -> None:
@@ -180,6 +188,16 @@ if __name__ == "__main__":
         defaults=["resources/datasets/dataset.csv"],
     )
 
+    parser.register_subcommand(
+        subcommand="train",
+        arguments=["--input", "--output"],
+        helps=[
+            "The input path for the data.", "The output path for the model"
+        ],
+        defaults=[],
+    )
+
+
     args = parser.parse_arguments(sys.argv[1:])
 
     if args.subcommand == "prepare":
@@ -187,3 +205,6 @@ if __name__ == "__main__":
 
     elif args.subcommand == "study":
         study_data(args.input) 
+
+    elif args.subcommand == "train":
+        train_model(args.input, args.output)
