@@ -1,9 +1,14 @@
 import sys
 import logging
 import torch
+import os
+from torch.utils.data import random_split
+from torch import optim
 from data.CSVDataset import CSVDataset
-
+from model.MyNet import MyNet
+import torch.nn as nn
 import pandas as pd
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, accuracy_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
@@ -88,8 +93,118 @@ def prepare_data(input_path: str, output_path: str) -> None:
 
 
 def train_model(input_path: str, out_path_model: str) -> None:
-    train_data = CSVDataset(input_path)
-    pass
+    config_manager = ConfigManager()
+    config_manager.load_config("config/dataset.json")
+    target_column = config_manager.get_value("dataset", "target_column")
+    os.makedirs(out_path_model, exist_ok=True)
+
+    full_path = os.path.join(out_path_model, "best_model.pth")
+
+    # Creo oggetto Dataset
+    dataset = CSVDataset(input_path, target_column)
+
+    # Definisco validation dataset e training dataset
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+
+    train_data, val_data = random_split(dataset, [train_size, val_size])
+
+    train_loader = torch.utils.data.DataLoader(
+        train_data,
+        batch_size=64,
+        shuffle=True
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_data,
+        batch_size=64,
+        shuffle=False
+    )
+
+    device = ('cuda' if torch.cuda.is_available() else 'cpu') 
+    model = MyNet(input, 1).to(device=device)
+    criterion = nn.BCEWithLogitsLoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+
+    patience = 10
+    counter = 0
+    best_loss = float('inf')
+    N_EPOCHS = 15
+    for epoch in range(N_EPOCHS):
+        train_loss = 0.0
+        model.train()
+        for inputs, targets in train_loader:
+            inputs = inputs.to(device)
+            labels = targets.to(device)
+
+            # Evito gradient accumulation
+            optimizer.zero_grad()
+
+            # Predict
+            outputs = model(inputs)
+
+            # Calcolo loss con bce
+            loss = criterion(outputs, labels)
+
+            # Calcolo gradienti
+            loss.backward() 
+
+            # Gradient Descent
+            optimizer.step()
+
+            train_loss += loss.item()
+        
+        # Validation loss
+        val_loss = 0.0
+        all_preds = []
+        all_labels = []
+
+        # Modello in validation mode
+        model.eval()
+        for inputs, targets in val_loader:
+            inputs = inputs.to(device)
+            labels = targets.to(device)
+            # Predict
+            outputs = model(inputs)
+
+            # Calcolo loss con bce
+            loss = criterion(outputs, labels)
+            val_loss += loss.item()
+
+            probs = torch.sigmoid(outputs)
+            preds = (probs >= 0.5).int()
+
+            # Salvo tutte le labels e gli outputs per usare metriche
+            all_preds.append(preds.cpu())
+            all_labels.append(labels.cpu().int())
+        
+        if val_loss < best_loss:
+            best_loss = val_loss
+            torch.save(model.state_dict(), full_path)
+            counter = 0
+        else:
+            counter += 1
+            print("Patience +1")
+
+        all_preds = torch.cat(all_preds).numpy()
+        all_labels = torch.cat(all_labels).numpy()
+
+        # Metriche
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision = precision_score(all_labels, all_preds)
+        recall = recall_score(all_labels, all_preds)
+        f1 = f1_score(all_labels, all_preds)
+        confusionM = confusion_matrix(all_labels, all_preds)
+        
+        print("Epoch: {} Patience: {} Validation Loss: {} Training Loss: {}".format(epoch, counter, val_loss/len(val_loader), train_loss/len(train_loader)))
+        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}, Accuracy: {accuracy:.4f}")
+        print("Confusion Matrix:\n", confusionM)
+
+        if counter >= patience:
+            print(f"Validation loss didn't improve for more than {patience} epochs")
+            break
+
+
 
 
 def help_study() -> None:
