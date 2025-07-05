@@ -1,6 +1,8 @@
 # Custom skipped files
 resources/
 graphs/
+saved_models/
+tensorboard_logs/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

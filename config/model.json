@@ -1,0 +1,21 @@
+{
+    "small" : {
+        "hidden_layers" : [128, 64, 32],
+        "dropout" : 0.1,
+        "norm" : true,
+        "output_layer" : 1,
+        "lr" : 0.001,
+        "momentum" : 0.9,
+        "patience" : 5
+    },
+
+    "small2" : {
+        "hidden_layers" : [256, 256, 128, 64, 32],
+        "dropout" : 0.15,
+        "norm" : true,
+        "output_layer" : 1,
+        "lr" : 0.001,
+        "momentum" : 0.9,
+        "patience" : 5
+    }
+}
