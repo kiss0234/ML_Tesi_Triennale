@@ -10,7 +10,7 @@
     },
 
     "small2" : {
-        "hidden_layers" : [256, 256, 128, 64, 32],
+        "hidden_layers" : [256, 128, 64, 32],
         "dropout" : 0.15,
         "norm" : true,
         "output_layer" : 1,

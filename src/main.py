@@ -3,37 +3,54 @@ import logging
 import torch
 import os
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import random_split
 from torch import optim
 from data.CSVDataset import CSVDataset
 from model.MyNet import MyNet
 import torch.nn as nn
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, accuracy_score, ConfusionMatrixDisplay
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from data.scalers.LogMinMaxScaler import LogMinMaxScaler
-from data.scalers.custom_binner import CustomBinner
-from data.scalers.custom_imputer import CustomImputer
-from data.scalers.frequency_encoder import FrequencyEncoder
-from sklearn.model_selection import train_test_split
 from utilities.memoryusage import print_memory_usage
 from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
 from data.study.study_labels import labels_study
-from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold
+from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold, preprocess, first_n_hosts_per_traffic, remove_one_sample
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 from data.study.study_cat_num import categorical_numerical_features_study
+from utilities.featurengineering import get_all_features_set, get_features, align_features
+from sklearn.model_selection import train_test_split
 
 
 setup_logging()
 logger = logging.getLogger(__name__)
 MAX_SPLIT = 1
 THRESHOLD = 3000
+
+def align(input_path : str, output_path : str):
+    df = pd.read_csv(input_path)
+    logger.info("Aligning...")
+    df_aligned = align_features(df, get_all_features_set())
+    logger.info("Aligned")
+    df_aligned.to_csv(output_path, index=False)
+
+def save_all_features(df1_path : str, df2_path : str):
+    df1 = pd.read_csv(df1_path)
+    df2 = pd.read_csv(df2_path)
+
+    get_features([df1, df2])
+
+    print(f"Dataset1 Features ({len(df1.columns)}): ")
+    print(df1.columns)
+
+    print(f"Dataset2 Features ({len(df2.columns)}):")
+    print(df2.columns)
+
+    all_features = get_all_features_set()
+    print(f"All Features ({len(all_features)}): ")
+    print(all_features)
 
 def divide_per_host(input_path : str, output_path : str) -> None:
     if(not os.path.exists(output_path)):
@@ -73,7 +90,7 @@ def prepare_attack_specific_data(input_path : str, attack : str, attack_nrows : 
 
     # Check if attack nrows wanted are more than the actual attack rows
     if attack_rows < attack_nrows:
-        logger.info(f"There number of attack rows if lower than the parameter specified, proceeding with {attack_rows} as the actual number")
+        logger.info(f"The number of attack rows is lower than the parameter specified, proceeding with {attack_rows} as the actual number")
         attack_nrows = attack_rows
 
     # If more than 0 then splice
@@ -102,67 +119,21 @@ def prepare_data(input_path: str, output_path: str) -> None:
 
     logger.info(f"Loaded {df.shape[0]} rows")
 
-    # Loading feature types from json
-    logger.info("Loading feature types..")
+    train_ratio = 0.6
 
-    config_manager = ConfigManager()
-    config_manager.load_config("config/dataset.json")
-    numerical_columns = config_manager.get_value("dataset", "numeric_columns")
-    categorical_columns = config_manager.get_value("dataset", "categorical_columns")
-    target_column = config_manager.get_value("dataset", "target_column")
+    train_df, temp_data = train_test_split(df, test_size=(1-train_ratio), random_state=42)
+    validation_df, test_df = train_test_split(temp_data, test_size=0.5, random_state=42)
 
-    logger.info("Loading complete")
-
-    logger.info("Preprocessing...")
-
-    # Pipeline for numerical features
-    num_pipeline = Pipeline([
-        ("Impute", CustomImputer()),
-        # ("Binning", CustomBinner()),
-        ("Scaling", LogMinMaxScaler())
-    ])
-
-    # Pipeline per categorical features
-    cat_pipeline = Pipeline([
-        ("FrequencyEncoder", FrequencyEncoder(soglia=0.5)),
-        ("1hot", OneHotEncoder(sparse_output = False)),
-    ])
-
-    preprocessing = ColumnTransformer([
-        ("num", num_pipeline, numerical_columns),
-        ("cat", cat_pipeline, categorical_columns),
-    ])
-
-    array_preprocessed = preprocessing.fit_transform(df)
-
-    one_hot_column_names = preprocessing.named_transformers_["cat"].named_steps["1hot"].get_feature_names_out(categorical_columns)
-
-    all_columns = numerical_columns + list(one_hot_column_names)
-
-    df_preprocessed = pd.DataFrame(data=array_preprocessed, columns=all_columns)
-
-    df_preprocessed[target_column] = df[target_column]
-
-    train_ratio = 0.8
-
-    train_df, test_df = train_test_split(df_preprocessed, test_size=(1-train_ratio), random_state=None)
-
-    labels_train = train_df[target_column].value_counts()
-    labels_test = test_df[target_column].value_counts()
-
-    print("Training Set Labels:")
-    print(labels_train)
-
-    print("Test Set Labels:")
-    print(labels_test)
+    train_df_preprocessed, validation_df_preprocessed, test_df_preprocessed = preprocess(train_df, validation_df, test_df)
 
     if output_path != None:
-        train_df.to_csv(output_path + "_train.csv", index=False)
-        test_df.to_csv(output_path + "_test.csv", index=False)
+        train_df_preprocessed.to_csv(output_path + "_train.csv", index=False)
+        validation_df_preprocessed.to_csv(output_path + "_validation.csv", index=False)
+        test_df_preprocessed.to_csv(output_path + "_test.csv", index=False)
 
     logger.info("Preprocessed and saved correctly")
 
-def train_model(input_path : str, model_name : str, epochs : int, section : str) -> None:
+def train_model(training_path : str, validation_path : str, model_name : str, epochs : int, section : str) -> None:
     config_manager = ConfigManager()
     config_manager.load_config("config/dataset.json")
     target_column = config_manager.get_value("dataset", "target_column")
@@ -188,13 +159,8 @@ def train_model(input_path : str, model_name : str, epochs : int, section : str)
     logger.info("Loading data...")
 
     # Get Dataset Object
-    dataset = CSVDataset(input_path, target_column)
-
-    # Define training dataset and validation dataset
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-
-    train_data, val_data = random_split(dataset, [train_size, val_size])
+    train_data = CSVDataset(filepath=training_path, target_column=target_column)
+    val_data = CSVDataset(filepath=validation_path, target_column=target_column)
 
     train_loader = torch.utils.data.DataLoader(
         train_data,
@@ -225,7 +191,7 @@ def train_model(input_path : str, model_name : str, epochs : int, section : str)
     momentum = config_manager.get_value(section, "momentum")
     patience = config_manager.get_value(section, "patience")
     counter = 0
-    num_features = dataset.X.shape[1]
+    num_features = train_data.X.shape[1]
 
     # Model Creation
     device = ('cuda' if torch.cuda.is_available() else 'cpu') 
@@ -240,12 +206,8 @@ def train_model(input_path : str, model_name : str, epochs : int, section : str)
     logger.info(f"Dropout: {dropout}")
     logger.info(f"Normalization: {normalization}")
 
-    # num_positives = dataset.Y.sum()
-    # num_negatives = len(dataset.Y) - num_positives
-    # pos_weight = torch.tensor(num_negatives / num_positives, dtype=torch.float32, device=device)
-
     # Define Criterion and Optimization function
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss().to(device)
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     # Writer for tensorboard logs
@@ -259,7 +221,6 @@ def train_model(input_path : str, model_name : str, epochs : int, section : str)
     logger.info(f"Momentum: {momentum}")
     logger.info(f"Device: {device}")
     logger.info(f"Patience: {patience}")
-    # logger.info(f"Pos_Weight: {pos_weight:.4f}")
 
     # Best Loss for early stopping
     best_loss = float('inf')
@@ -366,7 +327,7 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
     target_column = config_manager.get_value("dataset", "target_column")
 
 
-    test_data = CSVDataset(input_path, target_column)
+    test_data = CSVDataset(filepath=input_path, target_column=target_column)
 
     test_loader = torch.utils.data.DataLoader(
         test_data,
@@ -402,7 +363,7 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
 
 
     model.load_state_dict(torch.load(model_path))
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss().to(device)
 
 
     test_loss = 0.0
@@ -443,6 +404,22 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
     print("Test Loss: {}".format(test_loss/len(test_loader)))
     print(f"Precision: {precision:.4f}\nRecall: {recall:.4f}\nF1: {f1:.4f}\nAccuracy: {accuracy:.4f}")
 
+    # Metrics Graph
+    fig, ax = plt.subplots()
+
+    metrics = ['accuracy', 'precision', 'recall', 'f1']
+    values = [accuracy, precision, recall, f1]
+
+    ax.bar(metrics, values, label=metrics, color=['tab:blue','tab:orange','tab:green','tab:red'])
+    ax.set_title('Metrics')
+    ax.set_yticks(np.arange(0, 1.05, 0.05))
+
+    # Save Graph
+    os.makedirs(output_path, exist_ok=True)
+    metrics_path = os.path.join(output_path, "Metrics.png")
+    plt.savefig(metrics_path)
+    print(f"Metrics saved in {metrics_path}")
+
     # Confusion Matrix
     confusionM = confusion_matrix(all_labels, all_preds)
     display_labels = ["Benign", "Attack"]
@@ -450,11 +427,104 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
     disp.plot(cmap="Blues")
 
     # Save Confusion Matrix Image
-    os.makedirs(output_path, exist_ok=True)
-    full_path = os.path.join(output_path, "TestingCM.png")
-    disp.figure_.savefig(full_path, dpi=300, bbox_inches="tight")
-    print(f"Confusion Matrix saved in {full_path}\n")
+    matrix_path = os.path.join(output_path, "TestingCM.png")
+    disp.figure_.savefig(matrix_path, dpi=300, bbox_inches="tight")
+    print(f"Confusion Matrix saved in {matrix_path}\n")
 
+def example(input_path : str, output_path : str, host_output_path : str):
+    logger.info("Loading data...")
+    df = pd.read_csv(input_path)
+    logger.info(f"Loaded {len(df)} rows")
+
+    first_5_hosts_per_traffic = first_n_hosts_per_traffic(df, 5)
+    logger.info("Top 5 hosts per traffic:")
+    logger.info(first_5_hosts_per_traffic)
+
+    logger.info("Filtering the dataset...")
+    df = df[df["IPV4_SRC_ADDR"].isin(first_5_hosts_per_traffic.keys()) | df["IPV4_DST_ADDR"].isin(first_5_hosts_per_traffic.keys())]
+    logger.info("Filtered")
+
+    logger.info(f"Created a dataset containing {len(df)} rows")
+
+    logger.info("Traffic SRC:")
+    logger.info(df["IPV4_SRC_ADDR"].value_counts())
+
+    logger.info("Traffic DST:")
+    logger.info(df["IPV4_DST_ADDR"].value_counts())
+
+    train_ratio = 0.6
+
+    df, removed1 = remove_one_sample(df, "IPV4_SRC_ADDR")
+
+    train_df, temp_data = train_test_split(df, test_size=(1-train_ratio), stratify=df["IPV4_SRC_ADDR"], random_state=42)
+
+    temp_data, removed2 = remove_one_sample(temp_data, "IPV4_SRC_ADDR")
+
+    validation_df, test_df = train_test_split(temp_data, test_size=0.5, stratify=temp_data["IPV4_SRC_ADDR"], random_state=42)
+
+    test_df = pd.concat([test_df, removed1, removed2])
+
+    del df
+    del temp_data
+
+    logger.info("Training Set Traffic SRC:")
+    logger.info(train_df["IPV4_SRC_ADDR"].value_counts())
+    logger.info("Training Set Traffic DST:")
+    logger.info(train_df["IPV4_DST_ADDR"].value_counts())
+    logger.info("Training Set Attack Categories:")
+    logger.info(train_df["Attack"].value_counts())
+
+    logger.info("\nValidation Set Traffic SRC:")
+    logger.info(validation_df["IPV4_SRC_ADDR"].value_counts())
+    logger.info("Validation Set Traffic DST:")
+    logger.info(validation_df["IPV4_DST_ADDR"].value_counts())
+    logger.info("Validation Set Attack Categories:")
+    logger.info(validation_df["Attack"].value_counts())
+
+    logger.info("\nTest Set Traffic SRC:")
+    logger.info(test_df["IPV4_SRC_ADDR"].value_counts())
+    logger.info("Test Set Traffic DST:")
+    logger.info(test_df["IPV4_DST_ADDR"].value_counts())
+    logger.info("Test Set Attack Categories:")
+    logger.info(test_df["Attack"].value_counts())
+
+    logger.info("Initiating preprocessing...")
+    train_df_preprocessed, validation_df_preprocessed, test_df_preprocessed = preprocess(train_df, validation_df, test_df)
+
+    # Riaggiungo la colonna degli attacchi per poter successivamente dividere i dataset per attacco
+    train_df_preprocessed["Attack"] = train_df["Attack"]
+    validation_df_preprocessed["Attack"] = validation_df["Attack"]
+    test_df_preprocessed["Attack"] = test_df["Attack"]
+
+
+    logger.info("Creating and saving host preprocessed datasets...")
+    for host in first_5_hosts_per_traffic.keys():
+        logger.info(f"Current Host: {host}")
+
+        temp_df = train_df_preprocessed[(train_df["IPV4_SRC_ADDR"] == host) | (train_df["IPV4_DST_ADDR"] == host)]
+        logger.info(f"\nCreated a training dataset of {len(temp_df)} rows")
+        logger.info("Train Dataset Attack Categories:")
+        logger.info(temp_df["Attack"].value_counts())
+        temp_df.to_csv(host_output_path + f"{host}_train.csv", index=False)
+
+        temp_df = validation_df_preprocessed[(validation_df["IPV4_SRC_ADDR"] == host) | (validation_df["IPV4_DST_ADDR"] == host)]
+        logger.info(f"Created a validation dataset of {len(temp_df)} rows")
+        logger.info("Validation Dataset Attack Categories:")
+        logger.info(temp_df["Attack"].value_counts())
+        temp_df.to_csv(host_output_path + f"{host}_validation.csv", index=False)
+
+        temp_df = test_df_preprocessed[(test_df["IPV4_SRC_ADDR"] == host) | (test_df["IPV4_DST_ADDR"] == host)]
+        logger.info(f"Created a test dataset of {len(temp_df)} rows")
+        logger.info("Test Dataset Attack Categories:")
+        logger.info(temp_df["Attack"].value_counts())
+        temp_df.to_csv(host_output_path + f"{host}_test.csv", index=False)
+    logger.info("Done")
+
+    logger.info("Saving general preprocessed datasets...")
+    train_df_preprocessed.to_csv(output_path + "dataset_train.csv", index=False)
+    validation_df_preprocessed.to_csv(output_path + "dataset_validation.csv", index=False)
+    test_df_preprocessed.to_csv(output_path + "dataset_test.csv", index=False)
+    logger.info("Saved")
 
 def help_study() -> None:
     print("------------------------------------")
@@ -538,7 +608,7 @@ if __name__ == "__main__":
         arguments=["--input", "--output"],
         helps=[
             "The input path for the data.",
-            "The output path for the prepared data.",
+            "The output path for the prepared data."
         ],
         defaults=["resources/datasets/dataset.csv", "resources/datasets"],
     )
@@ -554,21 +624,22 @@ if __name__ == "__main__":
 
     parser.register_subcommand(
         subcommand="train",
-        arguments=["--input", "--model_name", "--epochs", "--hyperparams"],
+        arguments=["--input", "--valid", "--model_name", "--epochs", "--hyperparams"],
         helps=[
-            "The input path for the data.", 
+            "The input path for the training data.", 
+            "The input path for the validation data",
             "The name of the model", 
             "The number of epochs", 
             "The json file section for the model hyperparameters"
         ],
-        defaults=["resources/datasets", "Model", 15, "small"],
+        defaults=["resources/datasets", "resources/datasets", "Model", 15, "small"],
     )
 
     parser.register_subcommand(
         subcommand="test",
         arguments=["--input", "--model", "--output", "--hyperparams"],
         helps=[
-            "The input path for the test data.",
+            "The input path for the testing data.",
             "The path for the model",
             "The output path for the graphs",
             "The json file section for the model hyperparameters"
@@ -594,6 +665,34 @@ if __name__ == "__main__":
         defaults=["resources/datasets", "resources/datasets"],
     )
 
+    parser.register_subcommand(
+        subcommand="get_features",
+        arguments=["--input1", "--input2"],
+        helps=[
+            "The input path for the first dataset.", "The input path for the second dataset" 
+        ],
+        defaults=["resources/datasets", "resources/datasets"],
+    )
+
+    parser.register_subcommand(
+        subcommand="align",
+        arguments=["--input", "--output"],
+        helps=[
+            "The input path for the first dataset.", "The output path for the dataset" 
+        ],
+        defaults=["resources/datasets", "resources/datasets"],
+    )
+
+    parser.register_subcommand(
+        subcommand="example",
+        arguments=["--input", "--output", "--output_host"],
+        helps=[
+            "The input path for the first dataset.",
+            "The output path for the preprocessed general dataset",
+            "The output path for the preprocessed host related datasets"
+        ],
+        defaults=["resources/datasets", "resources/datasets", "resources/datasets/hosts"],
+    )
 
     args = parser.parse_arguments(sys.argv[1:])
 
@@ -604,7 +703,7 @@ if __name__ == "__main__":
         study_data(args.input) 
 
     elif args.subcommand == "train":
-        train_model(args.input, args.model_name, int(args.epochs), args.hyperparams)
+        train_model(args.input, args.valid, args.model_name, int(args.epochs), args.hyperparams)
     
     elif args.subcommand == "test":
         test_model(args.input, args.model, args.output, args.hyperparams)
@@ -614,9 +713,25 @@ if __name__ == "__main__":
 
     elif args.subcommand == "divide_per_host":
         divide_per_host(args.input, args.output)
+    
+    elif args.subcommand == "get_features":
+        save_all_features(args.input1, args.input2)
 
+    elif args.subcommand == "align":
+        align(args.input, args.output)
+    
+    elif args.subcommand == "example":
+        example(args.input, args.output, args.output_host)
 
-# Imparare flower + featered learning
-# Test con 2 host con molti campioni, 1 solo attacco
-# Test con stessi 2 host uno sotto campionato con attacco (togli anche fino ad arrivare a 10000/1000 sample attacco totali)
-# Call il 15 alle 15.
+# 1: Preprocessing su tutto il dataset (tenendo solamente i primi 5 host) garantendo che la % di host tra training set,
+# validation set e test set rimanga la stessa. Successivamente fare anche la divisione per host dei 3 set
+# 2: Fare un training su un dataset contenente benign e un attacco (partendo dal più presente) cercando almeno un f1 > 80% 
+# (sfruttare i dataset preprocessati nel punto 1) 
+# 3: Visualizzare f1 degli host singoli nel processo federato per avere una visione migliore dell'allenamento del modello globale
+# e se sta underperformando su qualche modello
+# 4: Allenare un modello federato con 2 host relativi a quell'attacco e confrontare il modello generale 
+# col modello globale federato testandoli su un dataset di test di un host su cui si è fatto federated. 
+# 5: Infine ripetere lo stesso processo considerando uno dei due host come sottocampionato. Verificare quindi se riusciamo
+# ad ottenere un buon f1 nonostante si abbia un dataset sottocampionato. 
+
+# Per il preprocessing, inizialmente faccio in modo che ci siano solamente i 5 host più importanti 

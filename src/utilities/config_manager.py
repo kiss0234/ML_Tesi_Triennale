@@ -2,6 +2,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
+# BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 class ConfigManager:
     _instance = None
@@ -15,6 +16,8 @@ class ConfigManager:
 
     @classmethod
     def load_config(cls, config_path: str) -> None:
+       #  config_path = os.path.join(BASE_DIR, config_path)
+
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Configuration file '{config_path}' not found.")
 

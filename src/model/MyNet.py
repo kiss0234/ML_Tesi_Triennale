@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from typing import List
 
 class MyNet(nn.Module):
-    def __init__(self, input_dim : int, output_size : int, layers_neurons : List[int], dropout : float, layernorm : bool):
+    def __init__(self, input_dim : int, output_size : int, layers_size : List[int], dropout : float, layernorm : bool):
          # layernorm, rete parametrica, dropout parametrico, test con 1 attacco e benign
         super().__init__()
         
@@ -11,14 +11,14 @@ class MyNet(nn.Module):
 
         input_size = input_dim
 
-        for layer_neurons in layers_neurons:
+        for layer_size in layers_size:
 
             # Hidden Layer
-            layers.append(nn.Linear(input_size, layer_neurons))
+            layers.append(nn.Linear(input_size, layer_size))
 
             # Requested LayerNorm
             if layernorm:
-                layers.append(nn.LayerNorm(layer_neurons))
+                layers.append(nn.LayerNorm(layer_size))
 
             # Activator
             layers.append(nn.ReLU())
@@ -28,7 +28,7 @@ class MyNet(nn.Module):
                 layers.append(nn.Dropout(dropout))
             
             # Update layer input
-            input_size = layer_neurons
+            input_size = layer_size
         
         # Output logits
         layers.append(nn.Linear(input_size, output_size))
