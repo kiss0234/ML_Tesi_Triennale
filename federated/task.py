@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 import pandas as pd
 import logging
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from src.utilities.featurengineering import align_features, get_all_features_set
 from src.data.CSVDataset import CSVDataset
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -15,7 +14,6 @@ from src.data.scalers.LogMinMaxScaler import LogMinMaxScaler
 from src.data.scalers.custom_imputer import CustomImputer
 from src.data.scalers.frequency_encoder import FrequencyEncoder
 from src.utilities.config_manager import ConfigManager
-from src.model.MyNet import MyNet
 from flwr.common import Context
 
 fds = None  # Cache FederatedDataset
@@ -24,22 +22,23 @@ logger = logging.getLogger(__name__)
 def load_data(partition_id: int):
     # Load partition
     if partition_id == 0: 
-        partition = pd.read_csv("resources/datasets/hosts/attack/192.168.1.32_benign_xss.csv") 
+        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.31_train_dos.csv",
+                     "validation" : "resources/datasets/hosts/attack/192.168.1.31_validation_dos.csv"}
     elif partition_id == 1:
-        partition = pd.read_csv("resources/datasets/hosts/attack/192.168.1.1_benign_xss_10kSamples.csv")
+        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.30_train_dos.csv",
+                     "validation" : "resources/datasets/hosts/attack/192.168.1.30_validation_dos.csv"}
+    elif partition_id == 2:
+        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.1_train_dos.csv",
+                     "validation" : "resources/datasets/hosts/attack/192.168.1.1_validation_dos.csv"}
+    elif partition_id == 3:
+        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.184_train_dos.csv",
+                     "validation" : "resources/datasets/hosts/attack/192.168.1.184_validation_dos.csv"}
     else:
         return
 
-    # Preprocess the partition
-    training_set, validation_set, _ = preprocess(partition)
-
-    # Ensure all datasets have the same features
-    training_set = align_features(training_set, get_all_features_set())
-    validation_set = align_features(validation_set, get_all_features_set())
-
     # Create CSVDataset to use for DataLoader
-    training_set = CSVDataset(target_column="Label", data=training_set)
-    validation_set = CSVDataset(target_column="Label", data=validation_set)    
+    training_set = CSVDataset(target_column="Label", filepath=partition["train"])
+    validation_set = CSVDataset(target_column="Label", filepath=partition["validation"])
 
     # Create the dataloaders
     trainloader = DataLoader(training_set, batch_size=64, shuffle=True)

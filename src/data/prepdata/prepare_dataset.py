@@ -65,23 +65,24 @@ def scale_features(datasets : Dict[str, pd.DataFrame], numerical_features_names)
         transformers=[("normalize", scaler, numerical_features_names)], remainder="passthrough")
 
     datasetsScaled = {}
-
     for host, dataset in datasets.items():
-
+        print(len(dataset.columns))
         # Fit e transform sul dataset
         transformed_ndarray = column_transformer.fit_transform(dataset)
     
         # Nomi corretti nell'ordine giusto
         features = [name.split('__')[-1] for name in column_transformer.get_feature_names_out()]
-
         df = pd.DataFrame(data=transformed_ndarray, columns=features)
-
+        del transformed_ndarray
         # Fai downcast solamente di quelle numeriche, inizialmente sono float 64 dopo float 32
         for col in numerical_features_names:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], downcast="float")
 
-        datasetsScaled[host] = df
+        df.to_csv(f"resources/datasets/temporary/{host}.csv" ,index=False)
+        print(len(df.columns))
+        del df
+        datasetsScaled[host] = f"resources/datasets/temporary/{host}.csv"
         logger.info(f"{host} done")
     logger.info("Done")
     return datasetsScaled
@@ -120,7 +121,7 @@ def preprocess(train_df : pd.DataFrame, validation_df : pd.DataFrame, test_df : 
 
     # Pipeline per categorical features
     cat_pipeline = Pipeline([
-        ("FrequencyEncoder", FrequencyEncoder(soglia=0.5)),
+        ("FrequencyEncoder", FrequencyEncoder(soglia=0.3)),
         ("1hot", OneHotEncoder(sparse_output = False, handle_unknown="ignore")),
     ])
 
@@ -202,12 +203,11 @@ def first_n_hosts_per_traffic(df, n):
 def remove_one_sample(df, feature):
     values = df[feature].value_counts()
     only_one_sample = values[values == 1]
-    print(only_one_sample)
 
     mask = df[feature].isin(only_one_sample.keys())
     logger.info(f"Removing records of {feature}  with only 1 sample per category..")
-    df = df[~mask]
     removed = df[mask]
+    df = df[~mask]
     logger.info(f"Rows: {len(df)}, Removed: {len(removed)}")
 
     return (df, removed)

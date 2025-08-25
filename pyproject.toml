@@ -25,14 +25,16 @@ serverapp = "federated.server_app:app"
 clientapp = "federated.client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 10
+num-server-rounds = 30
 fraction-fit = 1
 local-epochs = 1
 hyper-parameters = "small"
-features_in = 60
+features_in = 58
 
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 2
+options.num-supernodes = 4
+options.backend.client-resources.num-cpus = 4 # each ClientApp assumes to use 4 CPU (default is 2)
+options.backend.client-resources.num-gpus = 0.0

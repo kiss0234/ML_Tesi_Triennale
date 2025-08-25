@@ -16,7 +16,7 @@ from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
 from data.study.study_labels import labels_study
-from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold, preprocess, first_n_hosts_per_traffic, remove_one_sample
+from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold, preprocess, first_n_hosts_per_traffic, remove_one_sample, scale_features
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 from data.study.study_cat_num import categorical_numerical_features_study
@@ -85,8 +85,7 @@ def prepare_attack_specific_data(input_path : str, attack : str, attack_nrows : 
 
     attack_df = df[attack_mask]
 
-    values = attack_df["Attack"].value_counts()
-    attack_rows = values[attack]
+    attack_rows = len(attack_df)
 
     # Check if attack nrows wanted are more than the actual attack rows
     if attack_rows < attack_nrows:
@@ -95,10 +94,10 @@ def prepare_attack_specific_data(input_path : str, attack : str, attack_nrows : 
 
     # If more than 0 then splice
     if attack_nrows > 0:
-        attack_df = attack_df.iloc[:attack_nrows]
+        attack_df = attack_df.sample(n=attack_nrows, random_state=42)
 
-    frames = [benign_df, attack_df]
-    new_df = pd.concat(frames)
+    new_df = pd.concat([benign_df, attack_df], ignore_index=True)
+    new_df = new_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     values = new_df["Attack"].value_counts()
 
@@ -106,32 +105,10 @@ def prepare_attack_specific_data(input_path : str, attack : str, attack_nrows : 
     logger.info(f"Benign: {values['Benign']}")
     logger.info(f"{attack}: {values[attack]}")
 
-    logger.info("Labels:")
-    print(new_df["Label"].value_counts())
+    new_df.drop(["Attack"], axis=1, inplace=True)
 
     new_df.to_csv(output_path, index=False)
     logger.info(f"Saved to {output_path}")
-
-def prepare_data(input_path: str, output_path: str) -> None:
-    logger.info("Preparing data...")
-
-    df = pd.read_csv(input_path)
-
-    logger.info(f"Loaded {df.shape[0]} rows")
-
-    train_ratio = 0.6
-
-    train_df, temp_data = train_test_split(df, test_size=(1-train_ratio), random_state=42)
-    validation_df, test_df = train_test_split(temp_data, test_size=0.5, random_state=42)
-
-    train_df_preprocessed, validation_df_preprocessed, test_df_preprocessed = preprocess(train_df, validation_df, test_df)
-
-    if output_path != None:
-        train_df_preprocessed.to_csv(output_path + "_train.csv", index=False)
-        validation_df_preprocessed.to_csv(output_path + "_validation.csv", index=False)
-        test_df_preprocessed.to_csv(output_path + "_test.csv", index=False)
-
-    logger.info("Preprocessed and saved correctly")
 
 def train_model(training_path : str, validation_path : str, model_name : str, epochs : int, section : str) -> None:
     config_manager = ConfigManager()
@@ -410,7 +387,8 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
     metrics = ['accuracy', 'precision', 'recall', 'f1']
     values = [accuracy, precision, recall, f1]
 
-    ax.bar(metrics, values, label=metrics, color=['tab:blue','tab:orange','tab:green','tab:red'])
+    bars = ax.bar(metrics, values, label=metrics, color=['tab:blue','tab:orange','tab:green','tab:red'])
+    ax.bar_label(bars, fmt='%.4f', padding=-15)
     ax.set_title('Metrics')
     ax.set_yticks(np.arange(0, 1.05, 0.05))
 
@@ -431,7 +409,7 @@ def test_model(input_path : str, model_path : str, output_path : str, section : 
     disp.figure_.savefig(matrix_path, dpi=300, bbox_inches="tight")
     print(f"Confusion Matrix saved in {matrix_path}\n")
 
-def example(input_path : str, output_path : str, host_output_path : str):
+def prepare_data(input_path : str, output_path : str, host_output_path : str):
     logger.info("Loading data...")
     df = pd.read_csv(input_path)
     logger.info(f"Loaded {len(df)} rows")
@@ -449,9 +427,6 @@ def example(input_path : str, output_path : str, host_output_path : str):
     logger.info("Traffic SRC:")
     logger.info(df["IPV4_SRC_ADDR"].value_counts())
 
-    logger.info("Traffic DST:")
-    logger.info(df["IPV4_DST_ADDR"].value_counts())
-
     train_ratio = 0.6
 
     df, removed1 = remove_one_sample(df, "IPV4_SRC_ADDR")
@@ -467,27 +442,25 @@ def example(input_path : str, output_path : str, host_output_path : str):
     del df
     del temp_data
 
+    print("\n")
     logger.info("Training Set Traffic SRC:")
-    logger.info(train_df["IPV4_SRC_ADDR"].value_counts())
-    logger.info("Training Set Traffic DST:")
-    logger.info(train_df["IPV4_DST_ADDR"].value_counts())
+    logger.info(train_df["IPV4_SRC_ADDR"].value_counts())   
     logger.info("Training Set Attack Categories:")
     logger.info(train_df["Attack"].value_counts())
 
-    logger.info("\nValidation Set Traffic SRC:")
+    print("\n")
+    logger.info("Validation Set Traffic SRC:")
     logger.info(validation_df["IPV4_SRC_ADDR"].value_counts())
-    logger.info("Validation Set Traffic DST:")
-    logger.info(validation_df["IPV4_DST_ADDR"].value_counts())
     logger.info("Validation Set Attack Categories:")
     logger.info(validation_df["Attack"].value_counts())
 
-    logger.info("\nTest Set Traffic SRC:")
+    print("\n")
+    logger.info("Test Set Traffic SRC:")
     logger.info(test_df["IPV4_SRC_ADDR"].value_counts())
-    logger.info("Test Set Traffic DST:")
-    logger.info(test_df["IPV4_DST_ADDR"].value_counts())
     logger.info("Test Set Attack Categories:")
     logger.info(test_df["Attack"].value_counts())
 
+    print("\n")
     logger.info("Initiating preprocessing...")
     train_df_preprocessed, validation_df_preprocessed, test_df_preprocessed = preprocess(train_df, validation_df, test_df)
 
@@ -497,22 +470,25 @@ def example(input_path : str, output_path : str, host_output_path : str):
     test_df_preprocessed["Attack"] = test_df["Attack"]
 
 
-    logger.info("Creating and saving host preprocessed datasets...")
+    logger.info("Creating and saving host preprocessed datasets...\n")
     for host in first_5_hosts_per_traffic.keys():
+        print("\n")
         logger.info(f"Current Host: {host}")
 
         temp_df = train_df_preprocessed[(train_df["IPV4_SRC_ADDR"] == host) | (train_df["IPV4_DST_ADDR"] == host)]
-        logger.info(f"\nCreated a training dataset of {len(temp_df)} rows")
+        logger.info(f"Created a training dataset of {len(temp_df)} rows")
         logger.info("Train Dataset Attack Categories:")
         logger.info(temp_df["Attack"].value_counts())
         temp_df.to_csv(host_output_path + f"{host}_train.csv", index=False)
 
+        print("\n")
         temp_df = validation_df_preprocessed[(validation_df["IPV4_SRC_ADDR"] == host) | (validation_df["IPV4_DST_ADDR"] == host)]
         logger.info(f"Created a validation dataset of {len(temp_df)} rows")
         logger.info("Validation Dataset Attack Categories:")
         logger.info(temp_df["Attack"].value_counts())
         temp_df.to_csv(host_output_path + f"{host}_validation.csv", index=False)
 
+        print("\n")
         temp_df = test_df_preprocessed[(test_df["IPV4_SRC_ADDR"] == host) | (test_df["IPV4_DST_ADDR"] == host)]
         logger.info(f"Created a test dataset of {len(temp_df)} rows")
         logger.info("Test Dataset Attack Categories:")
@@ -525,6 +501,24 @@ def example(input_path : str, output_path : str, host_output_path : str):
     validation_df_preprocessed.to_csv(output_path + "dataset_validation.csv", index=False)
     test_df_preprocessed.to_csv(output_path + "dataset_test.csv", index=False)
     logger.info("Saved")
+
+def reduce_dataset(input_path : str, keep_fraction : float, output_path : str):
+    df = pd.read_csv(input_path)
+
+    df_reduced, _ =  train_test_split(df ,train_size=keep_fraction, stratify=df["Label"], random_state=42)
+
+    logger.info("Label:")
+    logger.info(f"{df_reduced['Label'].value_counts()}")
+
+    df_reduced.to_csv(output_path, index=False)
+
+def drop_feature (input_path : str, feature : str, output_path : str):
+
+    df = pd.read_csv(input_path)
+
+    df.drop(columns=[feature], inplace=True)
+
+    df.to_csv(output_path, index=False)
 
 def help_study() -> None:
     print("------------------------------------")
@@ -541,7 +535,7 @@ def study_data(input_path: str):
     split = 0
 
     logger.info("Loading data...")
-    df = pd.read_csv(input_path, nrows=1000) 
+    df = pd.read_csv(input_path) 
     logger.info(f"Loaded {df.shape[0]} rows")
 
     logger.info("Loading feature types..")
@@ -591,6 +585,18 @@ def study_data(input_path: str):
                     remove_attacks_under_threshold(datasets, THRESHOLD)
                 else:
                     print("ERROR: Split the dataset first")
+            case "6":
+                    first_5_hosts_per_traffic = first_n_hosts_per_traffic(df, 5)
+                    logger.info("Top 5 hosts per traffic:")
+                    logger.info(first_5_hosts_per_traffic)
+
+                    logger.info("Filtering the dataset...")
+                    df = df[df["IPV4_SRC_ADDR"].isin(first_5_hosts_per_traffic.keys()) | df["IPV4_DST_ADDR"].isin(first_5_hosts_per_traffic.keys())]
+                    logger.info("Filtered")
+
+                    logger.info(f"Created a dataset containing {len(df)} rows")
+
+                    datasets = scale_features({"dataset_scaled" : df}, numerical_features)
             case "q":
                 break
             case _:
@@ -604,16 +610,6 @@ if __name__ == "__main__":
     parser = ArgumentParser("parser")
 
     parser.register_subcommand(
-        subcommand="prepare",
-        arguments=["--input", "--output"],
-        helps=[
-            "The input path for the data.",
-            "The output path for the prepared data."
-        ],
-        defaults=["resources/datasets/dataset.csv", "resources/datasets"],
-    )
-
-    parser.register_subcommand(
         subcommand="study",
         arguments=["--input"],
         helps=[
@@ -624,7 +620,7 @@ if __name__ == "__main__":
 
     parser.register_subcommand(
         subcommand="train",
-        arguments=["--input", "--valid", "--model_name", "--epochs", "--hyperparams"],
+        arguments=["--train", "--valid", "--model_name", "--epochs", "--hyperparams"],
         helps=[
             "The input path for the training data.", 
             "The input path for the validation data",
@@ -664,46 +660,50 @@ if __name__ == "__main__":
         ],
         defaults=["resources/datasets", "resources/datasets"],
     )
-
+    
     parser.register_subcommand(
-        subcommand="get_features",
-        arguments=["--input1", "--input2"],
-        helps=[
-            "The input path for the first dataset.", "The input path for the second dataset" 
-        ],
-        defaults=["resources/datasets", "resources/datasets"],
-    )
-
-    parser.register_subcommand(
-        subcommand="align",
-        arguments=["--input", "--output"],
-        helps=[
-            "The input path for the first dataset.", "The output path for the dataset" 
-        ],
-        defaults=["resources/datasets", "resources/datasets"],
-    )
-
-    parser.register_subcommand(
-        subcommand="example",
+        subcommand="prepare_data",
         arguments=["--input", "--output", "--output_host"],
         helps=[
             "The input path for the first dataset.",
             "The output path for the preprocessed general dataset",
-            "The output path for the preprocessed host related datasets"
+            "The output path for the preprocessed host datasets"
         ],
         defaults=["resources/datasets", "resources/datasets", "resources/datasets/hosts"],
+    )
+
+    parser.register_subcommand(
+        subcommand="reduce_data",
+        arguments=["--input", "--keep_fraction", "--output"],
+        helps=[
+            "The input path for the first dataset.",
+            "A value between 0 and 1, representing the fraction of the dataset that you want to keep",
+            "The output path for the dataset"
+        ],
+        defaults=["resources/datasets", 0.5, "resources/datasets"],
+    )
+
+    parser.register_subcommand(
+        subcommand="drop_feature",
+        arguments=["--input", "--feature", "--output"],
+        helps=[
+            "The input path for the first dataset.",
+            "Feature's name",
+            "The output path for the dataset"
+        ],
+        defaults=["resources/datasets", 0.5, "resources/datasets"],
     )
 
     args = parser.parse_arguments(sys.argv[1:])
 
     if args.subcommand == "prepare":
-        prepare_data(args.input, args.output)
+      prepare_data(args.input, args.output, args.output_host)
 
     elif args.subcommand == "study":
         study_data(args.input) 
 
     elif args.subcommand == "train":
-        train_model(args.input, args.valid, args.model_name, int(args.epochs), args.hyperparams)
+        train_model(args.train, args.valid, args.model_name, int(args.epochs), args.hyperparams)
     
     elif args.subcommand == "test":
         test_model(args.input, args.model, args.output, args.hyperparams)
@@ -714,15 +714,12 @@ if __name__ == "__main__":
     elif args.subcommand == "divide_per_host":
         divide_per_host(args.input, args.output)
     
-    elif args.subcommand == "get_features":
-        save_all_features(args.input1, args.input2)
-
-    elif args.subcommand == "align":
-        align(args.input, args.output)
+    elif args.subcommand == "reduce_data":
+        reduce_dataset(args.input, float(args.keep_fraction), args.output)
     
-    elif args.subcommand == "example":
-        example(args.input, args.output, args.output_host)
-
+    elif args.subcommand == "drop_feature":
+        drop_feature(args.input, args.feature, args.output)
+    
 # 1: Preprocessing su tutto il dataset (tenendo solamente i primi 5 host) garantendo che la % di host tra training set,
 # validation set e test set rimanga la stessa. Successivamente fare anche la divisione per host dei 3 set
 # 2: Fare un training su un dataset contenente benign e un attacco (partendo dal più presente) cercando almeno un f1 > 80% 

@@ -19,6 +19,7 @@ class FlowerClient(NumPyClient):
         self.partition_id = partition_id
 
     def fit(self, parameters, config):
+
         set_weights(self.net, parameters)
         train_loss = train(
             self.net,
@@ -35,7 +36,6 @@ class FlowerClient(NumPyClient):
     def evaluate(self, parameters, config):
         set_weights(self.net, parameters)
         current_round = config.get("current_round")
-        print(f"Client: {self.partition_id} Current_round: {current_round}")
         loss, accuracy, precision, recall, f1 = test(self.net, self.valloader, self.device)
 
         writer = SummaryWriter(log_dir="tensorboard_logs/federated/runs/results")

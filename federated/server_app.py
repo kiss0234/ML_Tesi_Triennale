@@ -39,7 +39,7 @@ def server_fn(context: Context):
         hyperparams = hyperparams,
         fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
-        min_available_clients=2,
+        min_available_clients=4,
         initial_parameters=parameters,
         evaluate_metrics_aggregation_fn=weighted_average,
         fit_metrics_aggregation_fn=weighted_average,

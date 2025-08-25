@@ -6,7 +6,7 @@
         "output_layer" : 1,
         "lr" : 0.001,
         "momentum" : 0.9,
-        "patience" : 5
+        "patience" : 10
     },
 
     "small2" : {
