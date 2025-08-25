@@ -1,7 +1,7 @@
 import logging
 import pandas as pd 
 import numpy as np
-from data.study.comparedist.cmpdist import  compare_distributions_all_features, plot_tables, plot_total_table
+from data.study.comparedist.cmpdist import  compare_distributions_all_features2, plot_tables, plot_total_table
 from typing import List, Dict
 from data.prepdata.prepare_dataset import scale_features, subdataset_per_feature_categories
 from data.prepdata.binning import binning
@@ -48,7 +48,7 @@ def categorical_numerical_features_study(datasets: Dict[str, pd.DataFrame], cate
 
             case "2":
                 if(not normalized):
-                    datasets = scale_features(datasets, numerical_features)
+                    # datasets = scale_features(datasets, numerical_features)
                     normalized = 1
                 else:
                     print("ERROR: You can't normalize the dataset again")
@@ -71,19 +71,19 @@ def categorical_numerical_features_study(datasets: Dict[str, pd.DataFrame], cate
                     
                     for attack, group in grouped_dicts.items():
                         print(f"Group: {attack}")
-                        compare_tables[attack] = compare_distributions_all_features(group, (categorical_features+numerical_features), attack)
+                        compare_tables[attack] = compare_distributions_all_features2(group, numerical_features, categorical_features, read=False, attack=attack)
                         
 
                 elif(normalized):
-                    compare_tables["general"] = compare_distributions_all_features(datasets, (categorical_features+numerical_features))
+                    compare_tables["General"] = compare_distributions_all_features2(datasets, numerical_features, categorical_features, read=False)
                 else:
                     print("ERROR: Normalize the datasets first")
             case "5":
-                if (len(compare_tables) <= 1) or ("general" not in compare_tables):
+                if (len(compare_tables) <= 1) or ("General" not in compare_tables):
                     print("ERROR: Generate all the tables first (both attack-specific and general) before plotting")
                 else:
-                    plot_tables(compare_tables)
-                    plot_total_table(compare_tables)
+                    plot_tables(compare_tables, metric="Jensen-Shannon Distance", feature="all")
+                    plot_total_table(compare_tables, metric="Jensen-Shannon Distance", feature="all")
             case "q":
                 divided = 0
                 normalized = 0
