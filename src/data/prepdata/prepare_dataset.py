@@ -1,17 +1,17 @@
 import logging
 import pandas as pd
 import numpy as np
-import os
 import matplotlib.pyplot as plt
-from typing import Dict
-from utilities.config_manager import ConfigManager
+from typing import Dict, List
 from sklearn.model_selection import train_test_split
+from utilities.config_manager import ConfigManager
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from data.scalers.LogMinMaxScaler import LogMinMaxScaler
 from data.scalers.custom_imputer import CustomImputer
 from data.scalers.frequency_encoder import FrequencyEncoder
+import os
  
 logger = logging.getLogger(__name__)
 MAX_DATASETS = 5
@@ -211,3 +211,198 @@ def remove_one_sample(df, feature):
     logger.info(f"Rows: {len(df)}, Removed: {len(removed)}")
 
     return (df, removed)
+
+def create_attack_dataset(df : pd.DataFrame, attack_category : str) -> pd.DataFrame:
+    logger.info(f"Creating a dataset containing Benign and {attack_category}..")
+    mask = (df["Attack"] == "Benign") | (df["Attack"] == attack_category)
+    df = df[mask].reset_index(drop=True)
+    logger.info(f"Created a dataset with {len(df)} rows\n")
+
+    return df
+
+def preprocess_categorical(df : pd.DataFrame, categorical_features : List[str]) -> pd.DataFrame:
+    # Pipeline for categorical features
+    cat_pipeline = Pipeline([
+        ("FrequencyEncoder", FrequencyEncoder(soglia=0.3)),
+        ("1hot", OneHotEncoder(sparse_output = False, handle_unknown="ignore")),
+    ])
+
+    preprocessing = ColumnTransformer([
+        ("cat", cat_pipeline, categorical_features)
+    ], remainder="passthrough")
+
+    logger.info("Preprocessing Categorical Features..")
+    transformed_array = preprocessing.fit_transform(df)
+    # Get the names from the fitted OneHotEncoder
+    one_hot_column_names = preprocessing.named_transformers_["cat"].named_steps["1hot"].get_feature_names_out(categorical_features)
+
+    remainder_columns = [col for col in df.columns if col not in categorical_features]
+    all_columns = list(one_hot_column_names) + remainder_columns
+
+    df = pd.DataFrame(data=transformed_array, columns=all_columns, index=df.index)
+    logger.info("Done\n")
+
+    return df
+
+def divide_dataset_per_host(df : pd.DataFrame, hosts : List[str], datasets_dir, check_for_attack=None, drop_ip=False) -> Dict[str, str]:
+    dfs = {}
+    logger.info("Creating dataset per host")
+    for host in hosts:
+        logger.info(f"Host: {host}")
+        temp_df = df[(df["IPV4_SRC_ADDR"] == host) | (df["IPV4_DST_ADDR"] == host)].copy()
+        logger.info(f"Created a dataset of {len(temp_df)} rows\n")
+
+        if drop_ip:
+            temp_df.drop(["IPV4_SRC_ADDR", "IPV4_DST_ADDR"], axis=1, inplace=True)
+
+        if check_for_attack == None:
+            dataset_path = os.path.join(datasets_dir, f"{host}.csv")
+            temp_df.to_csv(dataset_path, index=False)
+            dfs[host] = dataset_path
+        elif (temp_df["Attack"].value_counts()).get(check_for_attack) != None:
+            dataset_path = os.path.join(datasets_dir, f"{host}_{check_for_attack}.csv")
+            temp_df.to_csv(dataset_path, index=False)
+            dfs[host] = dataset_path
+        else:
+            logger.info(f"Host {host} excluded because it does not contain any {check_for_attack} rows")
+
+    return dfs
+            
+def balance_attack_data(dfs : Dict[str, str], attack : str, seed, output_dir, drop_attack=True):
+    dfs_sampled = {}
+    for host, df in dfs.items():
+        logger.info(f"Host: {host}, balancing attack data..")
+        df_loaded = pd.read_csv(df)
+        
+        benign_mask = df_loaded["Attack"] == "Benign"
+        attack_mask = df_loaded["Attack"] == attack
+
+        attack_df = df_loaded[attack_mask]
+        benign_df = df_loaded[benign_mask].sample(n=len(attack_df), random_state=seed)
+
+        new_df = pd.concat([benign_df, attack_df], ignore_index=True)
+        new_df = new_df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+        # values = new_df["Attack"].value_counts()
+
+        # logger.info(f"Created a dataset containing {len(new_df)} rows")
+        # logger.info(f"Benign: {values['Benign']}")
+        # logger.info(f"{attack}: {values[attack]}")
+
+        if drop_attack:
+            new_df.drop(["Attack"], axis=1, inplace=True)
+
+        dataset_path = os.path.join(output_dir, f"{host}_{attack}_balanced.csv")
+
+        new_df.to_csv(dataset_path, index=False)
+        dfs_sampled[host] = dataset_path
+        logger.info(f"Saved to {dataset_path}\n")
+    return dfs_sampled
+
+def prepare_training_validation_test(df : str, output_path, seed, train_ratio, drop=True, stratify=None):
+    logger.info("Preparing Training, Validation and Test set..")
+    df_loaded = pd.read_csv(df)
+
+    data_dict = {}
+
+    if stratify != None:
+        train_df, temp_df = train_test_split(df_loaded, test_size=(1-train_ratio), stratify=df_loaded[stratify], random_state=seed)
+        validation_df, test_df = train_test_split(temp_df, test_size=0.5, stratify=temp_df[stratify], random_state=seed)
+    else:
+        train_df, temp_df = train_test_split(df_loaded, test_size=(1-train_ratio), random_state=seed)
+        validation_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=seed)
+
+    if stratify != None and drop:
+        train_df.drop(["Attack"], axis=1, inplace=True)
+        validation_df.drop(["Attack"], axis=1, inplace=True)
+        test_df.drop(["Attack"], axis=1, inplace=True)
+
+    train_df.to_csv(output_path + f"_train.csv", index=False)
+    data_dict["train"] = output_path + f"_train.csv"
+
+    validation_df.to_csv(output_path + f"_validation.csv", index=False)
+    data_dict["validation"] = output_path + f"_validation.csv"
+
+    test_df.to_csv(output_path + f"_test.csv", index=False)
+    data_dict["test"] = output_path + f"_test.csv"
+
+    logger.info("Done\n")
+
+    return data_dict
+
+def preprocess_numerical(train_df, validation_df, test_df, numerical_features, output_path):
+    logger.info("Preprocessing Numerical Features...")
+
+    train_df = pd.read_csv(train_df)
+    validation_df = pd.read_csv(validation_df)
+    test_df = pd.read_csv(test_df)
+
+    # Pipeline for numerical features
+    num_pipeline = Pipeline([
+        ("Impute", CustomImputer()),
+        ("Scaling", LogMinMaxScaler())
+    ])
+
+    preprocessing = ColumnTransformer([
+        ("num", num_pipeline, numerical_features),
+    ], remainder="passthrough")
+
+    # Training Set Fit
+    preprocessing.fit(train_df)
+
+    # Training Set Transform
+    train_preprocessed = preprocessing.transform(train_df)
+
+    # Validation Set Transform
+    validation_preprocessing = preprocessing.transform(validation_df)
+
+    # Test Set Transform
+    test_preprocessed = preprocessing.transform(test_df)
+
+    remainder_passthrough = [col for col in train_df.columns if col not in numerical_features]
+
+    all_columns = numerical_features + remainder_passthrough
+
+    train_df_preprocessed = pd.DataFrame(data=train_preprocessed, columns=all_columns, index=train_df.index)
+    validation_df_preprocessed = pd.DataFrame(data=validation_preprocessing, columns=all_columns, index=validation_df.index)
+    test_df_preprocessed = pd.DataFrame(data=test_preprocessed, columns=all_columns, index=test_df.index)
+
+    assert all(train_df.index == train_df_preprocessed.index)
+    assert all(validation_df.index == validation_df_preprocessed.index)
+    assert all(test_df.index == test_df_preprocessed.index)
+
+    data_dict = {}
+    train_df_preprocessed.to_csv(output_path + f"_train.csv", index=False)
+    data_dict["train"] = output_path + f"_train.csv"
+
+    validation_df_preprocessed.to_csv(output_path + f"_validation.csv", index=False)
+    data_dict["validation"] = output_path + f"_validation.csv"
+
+    test_df_preprocessed.to_csv(output_path + f"_test.csv", index=False)
+    data_dict["test"] = output_path + f"_test.csv"
+
+    logger.info("Done\n")
+
+    return data_dict
+
+
+def filter_hosts_by_attack(hosts, df, attack):
+    logger.info(f"Checking if every host traffic contains {attack} labeled rows")
+    filtered = []
+    for host in hosts:
+        temp_df = df[(df["IPV4_SRC_ADDR"] == host) | (df["IPV4_DST_ADDR"] == host)]
+
+        if temp_df["Attack"].value_counts().get(attack) != None:
+            filtered.append(host)
+        else:
+            logger.info(f"Host {host} excluded because it does not contain any {attack} labeled rows")
+    logger.info("Hosts:")
+    logger.info(f"{filtered}\n")
+
+    return filtered
+
+def concat_all(df_training_test, category, output_path):
+        all = pd.concat([pd.read_csv(sets[category]) for _, sets in df_training_test.items()], ignore_index=True)
+        output_path = os.path.join(output_path, f"all_{category}.csv")
+        all.to_csv(output_path, index=False)
+        return output_path

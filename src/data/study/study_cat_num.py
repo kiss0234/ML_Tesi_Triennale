@@ -48,7 +48,7 @@ def categorical_numerical_features_study(datasets: Dict[str, pd.DataFrame], cate
 
             case "2":
                 if(not normalized):
-                    # datasets = scale_features(datasets, numerical_features)
+                    datasets = scale_features(datasets, numerical_features)
                     normalized = 1
                 else:
                     print("ERROR: You can't normalize the dataset again")
