@@ -19,6 +19,7 @@ from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
 from data.study.study_labels import labels_study
+import subprocess
 from data.prepdata.prepare_dataset import (
     divide_dataset, 
     remove_attacks_under_threshold, 
@@ -37,7 +38,7 @@ from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 from data.study.study_cat_num import categorical_numerical_features_study
 from utilities.featurengineering import get_all_features_set, get_features, align_features, load_feature_types
-from trainer.training_test import train_local_model, test_local_model, append_results
+from trainer.training_test import train_local_model, test_local_model, append_results, mean_and_std, plot_results
 from sklearn.model_selection import train_test_split
 import random 
 
@@ -662,27 +663,33 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
     # Not needed anymore
     del df
 
-    # Prepare Local Test Results Dict
+    # Prepare Test Results Dicts
     config_manager.load_config("config/results.json")
     results_local = {}
     for host in hosts:
         template = config_manager.get_section("local")
         results_local[host] = copy.deepcopy(template["host"])
 
+    results_federated = {}
+    for i in range(2, len(hosts)):
+        template = config_manager.get_section("federated")
+        results_federated[f"{i}_hosts"] = copy.deepcopy(template["N_hosts"])
+
     # Start Experiment Iteration
     random_seeds = [random.randint(1,300) for _ in range(2)]
     for seed in random_seeds:
         logger.info(f"New Iteration(seed:{seed})")
         # Balance Attack and Benign Proportions
-        dfs_sampled : Dict[str, str] = balance_attack_data(dfs, attack=attack_category, seed=seed, output_dir=datasets_dir, drop_attack=False)         
+        dfs_balanced : Dict[str, str] = balance_attack_data(dfs, attack=attack_category, seed=seed, output_dir=datasets_dir, drop_attack=False)         
         
         # Prepare data for training, validation and testing
         dict_training_test = {}
-        for host, df in dfs_sampled.items():
+        for host, df in dfs_balanced.items():
             logger.info(f"Current Host: {host}")
             output_path = os.path.join(datasets_dir, f"{host}_{attack_category}")
-            dict_training_test[host] = prepare_training_validation_test(df, train_ratio= 0.6, stratify="Attack", drop=True,
+            dict_training_test[host] = prepare_training_validation_test(df, train_ratio=0.6, stratify="Attack", drop=True,
                                                                        seed=seed, output_path=output_path)
+            
         # Dict containing all training, validation and test sets concatenated
         training_test_all = {}
         training_test_all["train"] = concat_all(dict_training_test, "train", datasets_dir)
@@ -736,11 +743,69 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
             logger.info("Results for combined test saved correctly\n")
         
         # FEDERATED
+        # Federated Config
+        save_model_dir = f"saved_models/experiment/{attack_category}/{seed}/federated/"
+        log_dir = f"tensorboard_logs/experiment/{attack_category}/{seed}/federated/runs"
+        os.makedirs(save_model_dir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
+        federated_config = {}
 
-    with open(f"results/{attack_category}/local/results.json", "w") as fp:
-        json.dump(results_local, fp, indent=4)
+        partition_ids = str(list(range(len(dict_training_test))))
+        partition = dict(zip(partition_ids, dict_training_test.items()))
+        federated_config["partition"] = partition
+        federated_config["seed"] = seed
+        federated_config["net"] = {
+            "hyperparams" : hyperparams,
+            "features_in" : len(training_test_all["train"].columns)
+        }
 
-    return
+        logger.info("Federated:")
+        for i in range(2, len(partition_ids)):
+            logger.info(f"Current: Federated Model with {i} hosts")
+
+            current_log_dir = os.path.join(log_dir, f"{i}_hosts")
+            current_save_model_dir = os.path.join(save_model_dir, f"{i}_hosts/best_model.pth")
+            os.makedirs(current_log_dir, exist_ok=True)
+            os.makedirs(current_save_model_dir, exist_ok=True)
+
+            federated_config["log_dir"] = current_log_dir
+            federated_config["save_model_dir"] = current_save_model_dir
+
+            # Save everything to JSON
+            with open(f"config/federated_config.json") as fp:
+                json.dump(federated_config, fp)
+
+            cmd = ["flwr", "run", ".", "--run-config", f"num-supernodes={i}"]
+            # Run the command and capture output
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            print("STDOUT:")
+            print(result.stdout)
+
+            print("STDERR:")
+            print(result.stderr)
+
+            results = test_local_model(model_path=current_save_model_dir, test_path=training_test_all["test"], 
+                                                               results_dir=f"graphs/experiment/{attack_category}/{seed}/federated/test_combined/{i}_hosts",
+                                                               section=hyperparams, target_column=target_column)
+            logger.info("Testing Done\n")
+            append_results(results_federated[f"{i}_hosts"]["test_combined"], results)
+            logger.info("Results for combined test saved correctly\n")
+
+    results = {
+        "local" : results_local,
+        "federated" : results_federated
+    }
+
+    for _, models in results.items():
+        for model, tests in models:
+            for _, test_result in tests.items():
+                mean_and_std(test_result)
+
+    with open(f"results/{attack_category}/results.json", "w") as fp:
+        json.dump(results, fp, indent=4)
+
+    plot_results(results, output_path=f"results/{attack_category}/plots", metrics=["mean_precision", "mean_recall", "mean_recall", "mean_accuracy"])
 
 if __name__ == "__main__":
     parser = ArgumentParser("parser")

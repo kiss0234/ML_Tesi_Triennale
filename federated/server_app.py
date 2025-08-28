@@ -25,7 +25,7 @@ def server_fn(context: Context):
     # Read from config
     num_rounds = context.run_config["num-server-rounds"]
     fraction_fit = context.run_config["fraction-fit"]
- 
+
     # Load Net Hyperparameters
     hyperparams = load_hyperparameters(context)
     net = MyNet(**hyperparams)
@@ -39,12 +39,12 @@ def server_fn(context: Context):
         hyperparams = hyperparams,
         fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
-        min_available_clients=4,
         initial_parameters=parameters,
         evaluate_metrics_aggregation_fn=weighted_average,
         fit_metrics_aggregation_fn=weighted_average,
         on_evaluate_config_fn=config_fn
     )
+    
     config = ServerConfig(num_rounds=num_rounds)
 
     return ServerAppComponents(strategy=strategy, config=config)

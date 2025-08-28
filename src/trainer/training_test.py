@@ -326,3 +326,51 @@ def test_local_model(test_path : str, model_path : str, results_dir : str, secti
 def append_results(results, new_results):
     for key, value in new_results: 
         results[key].append(value)
+
+def mean_and_std(res):
+    for metric, results in res:
+        res[f"mean_{metric}"] = np.mean(results)
+        res[f"std_{metric}"] = np.std(results, ddof=1)
+
+def plot_results(data, output_path, metrics):
+ 
+    # Extract metrics for a specific test type from a section (local or federated)
+    def extract_metrics(section_data, test_type, metrics):
+        host_names = []
+        metrics_values = {}
+        for metric in metrics:
+            metrics_values[metric] = []
+
+        for host_name, tests in section_data.items():
+            if test_type in tests:
+                results = tests[test_type]
+                host_names.append(host_name)
+                for metric in metrics_values:
+                    value = results.get(metric)
+                    metrics_values[metric].append(value if value is not None else 0)
+
+        return host_names, metrics_values
+
+    # Plot bar charts
+    def plot_and_save_metrics(host_names, metrics, test_type, section_name, output_path):
+        for metric, values in metrics.items():
+            plt.figure(figsize=(10, 6))
+            plt.bar(host_names, values, color='mediumseagreen')
+            plt.xticks(rotation=45, ha='right')
+            plt.title(f"{section_name} - {test_type} - {metric}")
+            plt.ylabel(metric)
+            plt.xlabel("Host")
+            plt.tight_layout()
+            plt.savefig(f"{output_path}/{section_name}_{test_type}_{metric}.png")
+            plt.close()
+
+
+    # Plot Local Section
+    for test_type in ['test', 'test_combined']:
+        host_names, metrics_dict = extract_metrics(data['local'], test_type, metrics)
+        plot_and_save_metrics(host_names, metrics_dict, test_type,  output_path=output_path, section_name="Local")
+
+    # --- Plot Federated Section ---
+    for test_type in ['test_combined']:  # federated only has test_combined
+        host_names, metrics_dict = extract_metrics(data['federated'], test_type, metrics)
+        plot_and_save_metrics(host_names, metrics_dict, test_type, output_path=output_path, section_name="Federated")

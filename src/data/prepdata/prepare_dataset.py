@@ -403,6 +403,6 @@ def filter_hosts_by_attack(hosts, df, attack):
 
 def concat_all(df_training_test, category, output_path):
         all = pd.concat([pd.read_csv(sets[category]) for _, sets in df_training_test.items()], ignore_index=True)
-        output_path = os.path.join(output_path, f"all_{category}.csv")
+        output_path = os.path.join(output_path, f"combined_{category}.csv")
         all.to_csv(output_path, index=False)
         return output_path

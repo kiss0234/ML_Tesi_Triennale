@@ -21,28 +21,22 @@ logger = logging.getLogger(__name__)
 
 def load_data(partition_id: int):
     # Load partition
-    if partition_id == 0: 
-        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.31_train_dos.csv",
-                     "validation" : "resources/datasets/hosts/attack/192.168.1.31_validation_dos.csv"}
-    elif partition_id == 1:
-        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.30_train_dos.csv",
-                     "validation" : "resources/datasets/hosts/attack/192.168.1.30_validation_dos.csv"}
-    elif partition_id == 2:
-        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.1_train_dos.csv",
-                     "validation" : "resources/datasets/hosts/attack/192.168.1.1_validation_dos.csv"}
-    elif partition_id == 3:
-        partition = {"train" : "resources/datasets/hosts/attack/192.168.1.184_train_dos.csv",
-                     "validation" : "resources/datasets/hosts/attack/192.168.1.184_validation_dos.csv"}
-    else:
-        return
+    config_manager = ConfigManager()
+    config_manager.load_config("config/federated_config.json")
+
+    partition = config_manager.get_value(section="partition", key=str(partition_id))
+    seed = config_manager.get_value(key="seed")
+    logger.info(f"Loaded {partition}")
+    logger.info(f"Seed: {seed}")
 
     # Create CSVDataset to use for DataLoader
     training_set = CSVDataset(target_column="Label", filepath=partition["train"])
     validation_set = CSVDataset(target_column="Label", filepath=partition["validation"])
 
     # Create the dataloaders
-    trainloader = DataLoader(training_set, batch_size=64, shuffle=True)
-    valloader = DataLoader(validation_set, batch_size=64)
+    generator = torch.Generator().manual_seed(seed)
+    trainloader = DataLoader(training_set, batch_size=32, shuffle=True, generator=generator)
+    valloader = DataLoader(validation_set, batch_size=32, shuffle=False)
     return trainloader, valloader
 
 
@@ -106,17 +100,14 @@ def test(net, testloader, device):
     all_labels = torch.cat(all_labels).squeeze().numpy()
 
     # Metrics
-    accuracy = accuracy_score(all_labels, all_preds)
-    precision = precision_score(all_labels, all_preds, zero_division=0)
-    recall = recall_score(all_labels, all_preds, zero_division=0)
-    f1 = f1_score(all_labels, all_preds, zero_division=0)
+    accuracy = round(accuracy_score(all_labels, all_preds), 4)
+    precision = round(precision_score(all_labels, all_preds, zero_division=0), 4)
+    recall = round(recall_score(all_labels, all_preds, zero_division=0), 4)
+    f1 = round(f1_score(all_labels, all_preds, zero_division=0), 4)
 
     loss = test_loss / len(testloader)
 
     return loss, accuracy, precision, recall, f1
-
-    
-
 
 def get_weights(net):
     return [val.cpu().numpy() for _, val in net.state_dict().items()]
@@ -186,18 +177,24 @@ def preprocess(df : pd.DataFrame):
 def load_hyperparameters(context : Context):
     # Loading Hyperparameters from JSON
     config_manager = ConfigManager()
-    config_manager.load_config("config/model.json")
-    section = context.run_config["hyper-parameters"] 
-    layers_size = config_manager.get_value(section, "hidden_layers")
-    output_size = config_manager.get_value(section, "output_layer")
-    dropout = config_manager.get_value(section, "dropout")
-    normalization = config_manager.get_value(section, "norm")
-    input_dim = context.run_config["features_in"]
+    config_manager.load_config("config/federated_config.json")
+    hyperparams_section = config_manager.get_value(section="net", key="hyperparams") 
+    input_dim = config_manager.get_value("net", key="features_in")
+    seed = config_manager.get_value(key="seed")
 
-    hyperparams = {"input_dim" : input_dim,
+    config_manager.load_config("config/model.json")
+    layers_size = config_manager.get_value(hyperparams_section, "hidden_layers")
+    output_size = config_manager.get_value(hyperparams_section, "output_layer")
+    dropout = config_manager.get_value(hyperparams_section, "dropout")
+    normalization = config_manager.get_value(hyperparams_section, "norm")
+
+    hyperparams = {
+                   "input_dim" : input_dim,
                    "output_size" : output_size,
                    "layers_size" : layers_size,
                    "dropout" : dropout,
-                   "layernorm" : normalization}
+                   "layernorm" : normalization,
+                   "seed" : seed
+                   }
 
     return hyperparams
