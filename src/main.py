@@ -2,6 +2,8 @@ import sys
 import logging
 import torch
 import os
+import copy
+from typing import Dict, List
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 from data.CSVDataset import CSVDataset
@@ -9,6 +11,7 @@ from model.MyNet import MyNet
 import torch.nn as nn
 import pandas as pd
 import numpy as np
+import json
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, accuracy_score, ConfusionMatrixDisplay
 from utilities.memoryusage import print_memory_usage
@@ -16,13 +19,28 @@ from utilities.logging_config import setup_logging
 from utilities.argument_parser import ArgumentParser
 from utilities.config_manager import ConfigManager
 from data.study.study_labels import labels_study
-from data.prepdata.prepare_dataset import divide_dataset, remove_attacks_under_threshold, preprocess, first_n_hosts_per_traffic, remove_one_sample, scale_features
+import subprocess
+from data.prepdata.prepare_dataset import (
+    divide_dataset, 
+    remove_attacks_under_threshold, 
+    preprocess, first_n_hosts_per_traffic, 
+    remove_one_sample, scale_features, 
+    create_attack_dataset, 
+    preprocess_categorical,
+    divide_dataset_per_host,
+    balance_attack_data,
+    prepare_training_validation_test,
+    filter_hosts_by_attack,
+    preprocess_numerical,
+    concat_all
+    )
 from data.study.study_numerical import numerical_features_study
 from data.study.study_categorical import categorical_features_study
 from data.study.study_cat_num import categorical_numerical_features_study
-from utilities.featurengineering import get_all_features_set, get_features, align_features
+from utilities.featurengineering import get_all_features_set, get_features, align_features, load_feature_types
+from trainer.training_test import train_local_model, test_local_model, append_results, mean_and_std, plot_results
 from sklearn.model_selection import train_test_split
-
+import random 
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -605,6 +623,201 @@ def study_data(input_path: str):
         help_study()
         userInput = input("->")
 
+def start_test(input_path : str, attack_category : str, hyperparams : str):
+
+    # Basic Loading
+    logger.info("Loading data..")
+    df = pd.read_csv(input_path)
+    logger.info(f"Loaded {len(df)} rows, Features: {len(df.columns)}")
+
+    numerical_features, categorical_features, target_column = load_feature_types()
+
+    # Utilities
+    datasets_dir = "resources/datasets/experiment"
+    os.makedirs(f"results/{attack_category}", exist_ok=True)
+    os.makedirs(datasets_dir, exist_ok=True)
+    config_manager = ConfigManager()
+    random.seed(42)
+
+    # Define first 5 hosts per traffic
+    hosts = first_n_hosts_per_traffic(df, 5).keys()
+
+    # Create dataset with Benign and Attack
+    df = create_attack_dataset(df, attack_category)
+
+    # Select only the hosts with traffic containing the attack category
+    hosts = filter_hosts_by_attack(hosts, df, attack_category)
+
+    logger.info("Filtering the dataset...")
+    df = df[df["IPV4_SRC_ADDR"].isin(hosts) | df["IPV4_DST_ADDR"].isin(hosts)]
+    logger.info("Filtered")
+    logger.info(f"Created a dataset containing {len(df)} rows\n")
+
+    # Preprocess only the categorical features
+    df = preprocess_categorical(df, categorical_features)
+    
+    # Divide the dataset per host, considering only the ones with the specified attack
+    dfs : Dict[str : str] = divide_dataset_per_host(df, hosts, datasets_dir, 
+                                                    check_for_attack=attack_category, drop_ip=True) 
+    # Not needed anymore
+    del df
+
+    # Prepare Test Results Dicts
+    config_manager.load_config("config/results.json")
+    results_local = {}
+    for host in hosts:
+        template = config_manager.get_section("local")
+        results_local[host] = copy.deepcopy(template["host"])
+
+    results_federated = {}
+    for i in range(2, len(hosts)+1):
+        template = config_manager.get_section("federated")
+        results_federated[f"{i}_hosts"] = copy.deepcopy(template["N_hosts"])
+
+    # Start Experiment Iteration
+    random_seeds = [random.randint(1,300) for _ in range(5)]
+    for seed in random_seeds:
+        logger.info(f"New Iteration(seed:{seed})")
+        # Balance Attack and Benign Proportions
+        dfs_balanced : Dict[str, str] = balance_attack_data(dfs, attack=attack_category, seed=seed, output_dir=datasets_dir, drop_attack=False)         
+        
+        # Prepare data for training, validation and testing
+        dict_training_test = {}
+        for host, df in dfs_balanced.items():
+            logger.info(f"Current Host: {host}")
+            output_path = os.path.join(datasets_dir, f"{host}_{attack_category}")
+            dict_training_test[host] = prepare_training_validation_test(df, train_ratio=0.6, stratify="Attack", drop=True,
+                                                                       seed=seed, output_path=output_path)
+            
+        # Dict containing all training, validation and test sets concatenated
+        training_test_all = {}
+        training_test_all["train"] = concat_all(dict_training_test, "train", datasets_dir)
+        training_test_all["validation"] = concat_all(dict_training_test, "validation", datasets_dir)
+        training_test_all["test"] = concat_all(dict_training_test, "test", datasets_dir)
+
+        # Preprocess Numerical Features
+        for host, datasets in dict_training_test.items():
+            logger.info(f"Current: {host}")
+            output_path = os.path.join(datasets_dir, f"{host}_{attack_category}")
+            dict_training_test[host] = preprocess_numerical(datasets["train"], datasets["validation"],
+                                                           datasets["test"], numerical_features, output_path)
+        
+        # Preprocess Combined Datasets Numerical Features
+        logger.info("Preprocessing the combined datasets..")
+        output_path = os.path.join(datasets_dir, f"combined_{attack_category}")
+        training_test_all = preprocess_numerical(training_test_all["train"], training_test_all["validation"],
+                                                 training_test_all["test"], numerical_features,
+                                                 output_path=output_path)
+        logger.info("Done\n")
+
+
+        logger.info("Training and Testing Phase:\n")
+        for host, datasets in dict_training_test.items():
+            logger.info(f"Training Model Host: {host}")
+            logger.info("Current: Local Model")
+            model_name = f"{host}_{attack_category.upper()}_{hyperparams}" 
+
+            # Train Best Model
+            best_model_path = train_local_model(training_path=datasets["train"], validation_path=datasets["validation"], seed=seed,
+                                           target_column=target_column, save_model_dir=f"saved_models/experiment/{attack_category}/{seed}/local",
+                                           model_name=model_name, tensorboard_logs_dir=f"tensorboard_logs/experiment/{attack_category}/{seed}/local/runs",
+                                           section=hyperparams)
+            
+
+            # Test Best Model on the host test set
+            logger.info("Testing on host test set")
+            results = test_local_model(model_path=best_model_path, test_path=datasets["test"], 
+                                      results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test/{model_name}", 
+                                      section=hyperparams, target_column=target_column)
+            logger.info("Testing Done")
+            append_results(results_local[host]["test"], results)
+            logger.info(f"Results for local test saved correctly\n")
+
+            # Test Best Model on the combined test sets
+            logger.info("Testing on the combined test sets")
+            results = test_local_model(model_path=best_model_path, test_path=training_test_all["test"], 
+                                      results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test_combined/{model_name}",
+                                      section=hyperparams, target_column=target_column)
+            logger.info("Testing Done\n")
+            append_results(results_local[host]["test_combined"], results)
+            logger.info("Results for combined test saved correctly\n")
+        
+        # FEDERATED
+        # Federated Config
+        flower_config = "pyproject.toml"
+        save_model_dir = f"saved_models/experiment/{attack_category}/{seed}/federated/"
+        log_dir = f"tensorboard_logs/experiment/{attack_category}/{seed}/federated/runs"
+        os.makedirs(save_model_dir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
+        federated_config = {}
+
+        partition_ids = [str(i) for i in range(len(dict_training_test.keys()))]
+        partition = dict(zip(partition_ids, dict_training_test.items()))
+        federated_config["partition"] = partition
+        federated_config["net"] = {
+            "hyperparams" : hyperparams,
+            "features_in" : len(pd.read_csv(training_test_all["train"]).columns)-1 # Minus Label
+        }
+
+        logger.info("Federated:")
+        for i in range(2, len(partition_ids)+1):
+            logger.info(f"Current: Federated Model with {i} hosts")
+
+            current_log_dir = os.path.join(log_dir, f"{i}_hosts")
+            current_save_model_dir = os.path.join(save_model_dir, f"{i}_hosts")
+            model_name = "best_model.pth"
+            best_model_path = os.path.join(current_save_model_dir, model_name)
+            os.makedirs(current_log_dir, exist_ok=True)
+            os.makedirs(current_save_model_dir, exist_ok=True)
+
+            federated_config["utility"] = {
+                                           "seed" : seed,
+                                           "log_dir" : current_log_dir,
+                                           "save_model_dir" : best_model_path
+                                           }
+
+            # Save everything to JSON
+            with open(f"config/federated_config.json", "w") as fp:
+                json.dump(federated_config, fp)
+
+            # Modify pyproject.toml number of supernodes
+            with open(flower_config, "r") as file:
+                lines = file.readlines()
+
+            for j, line in enumerate(lines):
+                if line.startswith("options.num-supernodes ="):
+                    lines[j] = f"options.num-supernodes = {i}\n"
+
+            with open(flower_config, "w") as file:
+                file.writelines(lines)
+
+            cmd = ["flwr", "run", "."]
+            # Run the command and capture output
+            result = subprocess.run(cmd, text=True)
+
+            results = test_local_model(model_path=best_model_path, test_path=training_test_all["test"], 
+                                                               results_dir=f"graphs/experiment/{attack_category}/{seed}/federated/test_combined/{i}_hosts",
+                                                               section=hyperparams, target_column=target_column)
+            logger.info("Testing Done\n")
+            append_results(results_federated[f"{i}_hosts"]["test_combined"], results)
+            logger.info("Results for combined test saved correctly\n")
+            print(results_federated)
+
+    results = {
+        "local" : results_local,
+        "federated" : results_federated
+    }
+
+    for _, models in results.items():
+        for _, tests in models.items():
+            for _, test_result in tests.items():
+                mean_and_std(test_result)
+
+    with open(f"results/{attack_category}/results.json", "w") as fp:
+        json.dump(results, fp, indent=4)
+
+    os.makedirs(f"results/{attack_category}/plots", exist_ok=True)
+    plot_results(results, output_path=f"results/{attack_category}/plots", metrics=["mean_precision", "mean_recall", "mean_recall", "mean_accuracy"])
 
 if __name__ == "__main__":
     parser = ArgumentParser("parser")
@@ -694,6 +907,17 @@ if __name__ == "__main__":
         defaults=["resources/datasets", 0.5, "resources/datasets"],
     )
 
+    parser.register_subcommand(
+        subcommand="start_test",
+        arguments=["--input", "--attack", "--hyperparams"],
+        helps=[
+            "The input path for the first dataset.",
+            "The attack category",
+            "The json file section for the model hyperparameters"
+        ],
+        defaults=["resources/datasets", None, "small"],
+    )
+
     args = parser.parse_arguments(sys.argv[1:])
 
     if args.subcommand == "prepare":
@@ -719,6 +943,9 @@ if __name__ == "__main__":
     
     elif args.subcommand == "drop_feature":
         drop_feature(args.input, args.feature, args.output)
+    
+    elif args.subcommand == "start_test":
+        start_test(args.input, args.attack, args.hyperparams)
     
 # 1: Preprocessing su tutto il dataset (tenendo solamente i primi 5 host) garantendo che la % di host tra training set,
 # validation set e test set rimanga la stessa. Successivamente fare anche la divisione per host dei 3 set

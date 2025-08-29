@@ -3,6 +3,8 @@ resources/
 graphs/
 saved_models/
 tensorboard_logs/
+results/
+config/datasets.json
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

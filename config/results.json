@@ -1,0 +1,28 @@
+{
+    "local" : {
+        "host" : {
+            "test" : {
+                "precision" : [],
+                "recall" : [],
+                "f1" : [],
+                "accuracy" : []
+            },
+            "test_combined" : {
+                "precision" : [],
+                "recall" : [],
+                "f1" : [],
+                "accuracy" : []
+            }
+        }
+    },
+    "federated" : {
+        "N_hosts" : {
+            "test_combined" : {
+                "precision" : [],
+                "recall" : [],
+                "f1" : [],
+                "accuracy" : []
+            }
+        }
+    }
+}

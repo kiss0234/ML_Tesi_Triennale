@@ -5,6 +5,7 @@ from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from federated.task import get_weights, load_hyperparameters
 from src.model.MyNet import MyNet
 from federated.MyFedAvg import MyFedAvg
+from src.utilities.config_manager import ConfigManager
 
 def weighted_average(metrics):
     num_examples = sum([num_example for num_example, _ in metrics])
@@ -25,7 +26,12 @@ def server_fn(context: Context):
     # Read from config
     num_rounds = context.run_config["num-server-rounds"]
     fraction_fit = context.run_config["fraction-fit"]
- 
+
+    config_manager = ConfigManager()
+    config_manager.load_config("config/federated_config.json")
+    tensorboard_logs_dir = config_manager.get_value(section="utility", key="log_dir")
+    save_model_dir = config_manager.get_value(section="utility", key="save_model_dir")
+
     # Load Net Hyperparameters
     hyperparams = load_hyperparameters(context)
     net = MyNet(**hyperparams)
@@ -39,12 +45,15 @@ def server_fn(context: Context):
         hyperparams = hyperparams,
         fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
-        min_available_clients=4,
         initial_parameters=parameters,
         evaluate_metrics_aggregation_fn=weighted_average,
         fit_metrics_aggregation_fn=weighted_average,
-        on_evaluate_config_fn=config_fn
+        on_evaluate_config_fn=config_fn,
+        save_model_dir=save_model_dir,
+        tensorboard_logs_dir=tensorboard_logs_dir,
+        delta=0.005
     )
+    
     config = ServerConfig(num_rounds=num_rounds)
 
     return ServerAppComponents(strategy=strategy, config=config)
