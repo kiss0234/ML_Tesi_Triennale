@@ -266,6 +266,8 @@ def divide_dataset_per_host(df : pd.DataFrame, hosts : List[str], datasets_dir, 
         else:
             logger.info(f"Host {host} excluded because it does not contain any {check_for_attack} rows")
 
+        print(temp_df["Attack"].value_counts())
+
     return dfs
             
 def balance_attack_data(dfs : Dict[str, str], attack : str, seed, output_dir, drop_attack=True):
@@ -325,6 +327,11 @@ def prepare_training_validation_test(df : str, output_path, seed, train_ratio, d
 
     test_df.to_csv(output_path + f"_test.csv", index=False)
     data_dict["test"] = output_path + f"_test.csv"
+
+    print(len(train_df.columns))
+    print(len(validation_df.columns))
+    print(len(test_df.columns))
+    print(train_df.columns)
 
     logger.info("Done\n")
 
@@ -404,6 +411,8 @@ def filter_hosts_by_attack(hosts, df, attack):
 def concat_all(df_training_test, category, output_path):
         all = pd.concat([pd.read_csv(sets[category]) for _, sets in df_training_test.items()], ignore_index=True)
         output_path = os.path.join(output_path, f"combined_{category}.csv")
+        print(len(all.columns))
+        print(all.columns)
         logger.info(f"{category}: {len(all)}")
         all.to_csv(output_path, index=False)
         return output_path

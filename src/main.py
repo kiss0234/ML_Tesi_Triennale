@@ -710,12 +710,6 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
                                                  output_path=output_path)
         logger.info("Done\n")
 
-        logger.info("Merging Validation Combined with Test Combined")
-        new_test_combined = pd.concat([pd.read_csv(training_test_all["validation"]), pd.read_csv(training_test_all["test"])], ignore_index=True)
-        logger.info(f"Rows of new test set: {len(new_test_combined)}")
-        training_test_all["test"] = new_test_combined.to_csv()
-        del new_test_combined
-        logger.info("New Test Set Created")
 
         logger.info("Training and Testing Phase:\n")
         for host, datasets in dict_training_test.items():

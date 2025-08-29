@@ -7,10 +7,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 class MyFedAvg(FedAvg):
 
-    def __init__(self, hyperparams, tensorboard_logs_dir, save_model_dir, *args, **kwargs):
+    def __init__(self, hyperparams, tensorboard_logs_dir, save_model_dir, delta, *args, **kwargs):
         self.hyperparams = hyperparams
         self.tensorboard_logs_dir = tensorboard_logs_dir
         self.save_model_dir = save_model_dir
+        self.best_loss = None
+        self.delta = delta
+        self.current_parameters = None
         return super().__init__(*args, **kwargs)
     
     def aggregate_fit(self, server_round, results, failures):
@@ -27,13 +30,21 @@ class MyFedAvg(FedAvg):
 
         writer.close()
 
-        torch.save(net.state_dict(), self.save_model_dir)
+        self.current_parameters = net.state_dict()
 
         return parameters_aggregated, metrics_aggregated
     
     def aggregate_evaluate(self, server_round, results, failures):
         loss_aggregated, metrics_aggregated = super().aggregate_evaluate(server_round, results, failures)
 
+        if server_round == 1:
+            torch.save(self.current_parameters, self.save_model_dir)
+            self.best_loss = loss_aggregated
+        elif ((self.best_loss - loss_aggregated ) / self.best_loss) > self.delta:
+            torch.save(self.current_parameters, self.save_model_dir)
+            self.best_loss = loss_aggregated
+        print(f"Saving model at round {server_round} with loss {loss_aggregated:.4f}")
+        
         # Log every metric
         writer = SummaryWriter(log_dir=self.tensorboard_logs_dir)
 

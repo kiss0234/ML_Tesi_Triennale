@@ -50,7 +50,8 @@ def server_fn(context: Context):
         fit_metrics_aggregation_fn=weighted_average,
         on_evaluate_config_fn=config_fn,
         save_model_dir=save_model_dir,
-        tensorboard_logs_dir=tensorboard_logs_dir
+        tensorboard_logs_dir=tensorboard_logs_dir,
+        delta=0.005
     )
     
     config = ServerConfig(num_rounds=num_rounds)
