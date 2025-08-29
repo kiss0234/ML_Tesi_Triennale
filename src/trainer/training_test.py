@@ -9,6 +9,7 @@ from data.CSVDataset import CSVDataset
 from model.MyNet import MyNet
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, accuracy_score, ConfusionMatrixDisplay
 
 logger = Logger(__name__)
@@ -328,8 +329,9 @@ def append_results(results, new_results):
         results[key].append(value)
 
 def mean_and_std(res):
-    for metric, results in res:
-        res[f"mean_{metric}"] = np.mean(results)
+    print(res)
+    for metric, results in list(res.items()):
+        res[f"mean_{metric}"] = round(np.mean(results), 4)
         res[f"std_{metric}"] = np.std(results, ddof=1)
 
 def plot_results(data, output_path, metrics):
@@ -353,9 +355,13 @@ def plot_results(data, output_path, metrics):
 
     # Plot bar charts
     def plot_and_save_metrics(host_names, metrics, test_type, section_name, output_path):
+        num_hosts = len(host_names)
+        colors = cm.get_cmap('tab10', num_hosts)  # Use 'tab10' or 'Set3' for distinct colors
         for metric, values in metrics.items():
             plt.figure(figsize=(10, 6))
-            plt.bar(host_names, values, color='mediumseagreen')
+
+            bar_colors = [colors(i) for i in range(num_hosts)]
+            plt.bar(host_names, values, color=bar_colors, width=0.6)
             plt.xticks(rotation=45, ha='right')
             plt.title(f"{section_name} - {test_type} - {metric}")
             plt.ylabel(metric)

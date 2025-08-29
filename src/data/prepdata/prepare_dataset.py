@@ -354,7 +354,7 @@ def preprocess_numerical(train_df, validation_df, test_df, numerical_features, o
     train_preprocessed = preprocessing.transform(train_df)
 
     # Validation Set Transform
-    validation_preprocessing = preprocessing.transform(validation_df)
+    validation_preprocessed = preprocessing.transform(validation_df)
 
     # Test Set Transform
     test_preprocessed = preprocessing.transform(test_df)
@@ -364,7 +364,7 @@ def preprocess_numerical(train_df, validation_df, test_df, numerical_features, o
     all_columns = numerical_features + remainder_passthrough
 
     train_df_preprocessed = pd.DataFrame(data=train_preprocessed, columns=all_columns, index=train_df.index)
-    validation_df_preprocessed = pd.DataFrame(data=validation_preprocessing, columns=all_columns, index=validation_df.index)
+    validation_df_preprocessed = pd.DataFrame(data=validation_preprocessed, columns=all_columns, index=validation_df.index)
     test_df_preprocessed = pd.DataFrame(data=test_preprocessed, columns=all_columns, index=test_df.index)
 
     assert all(train_df.index == train_df_preprocessed.index)
@@ -404,5 +404,6 @@ def filter_hosts_by_attack(hosts, df, attack):
 def concat_all(df_training_test, category, output_path):
         all = pd.concat([pd.read_csv(sets[category]) for _, sets in df_training_test.items()], ignore_index=True)
         output_path = os.path.join(output_path, f"combined_{category}.csv")
+        logger.info(f"{category}: {len(all)}")
         all.to_csv(output_path, index=False)
         return output_path

@@ -7,8 +7,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 class MyFedAvg(FedAvg):
 
-    def __init__(self, hyperparams, *args, **kwargs):
+    def __init__(self, hyperparams, tensorboard_logs_dir, save_model_dir, *args, **kwargs):
         self.hyperparams = hyperparams
+        self.tensorboard_logs_dir = tensorboard_logs_dir
+        self.save_model_dir = save_model_dir
         return super().__init__(*args, **kwargs)
     
     def aggregate_fit(self, server_round, results, failures):
@@ -19,13 +21,13 @@ class MyFedAvg(FedAvg):
         set_weights(net, weights)
 
         # Log every metric
-        writer = SummaryWriter(log_dir="tensorboard_logs/federated/runs/results")
+        writer = SummaryWriter(log_dir=self.tensorboard_logs_dir)
 
         writer.add_scalar("Loss/Train", metrics_aggregated["train_loss"], global_step=server_round)
 
         writer.close()
 
-        torch.save(net.state_dict(), f"saved_models/federated/global_round_{server_round}")
+        torch.save(net.state_dict(), self.save_model_dir)
 
         return parameters_aggregated, metrics_aggregated
     
@@ -33,7 +35,7 @@ class MyFedAvg(FedAvg):
         loss_aggregated, metrics_aggregated = super().aggregate_evaluate(server_round, results, failures)
 
         # Log every metric
-        writer = SummaryWriter(log_dir="tensorboard_logs/federated/runs/results")
+        writer = SummaryWriter(log_dir=self.tensorboard_logs_dir)
 
         writer.add_scalar("Loss/Valid", loss_aggregated, global_step=server_round)
         writer.add_scalar("Metrics/Accuracy/Valid", metrics_aggregated["accuracy"], global_step=server_round)

@@ -42,7 +42,6 @@ from trainer.training_test import train_local_model, test_local_model, append_re
 from sklearn.model_selection import train_test_split
 import random 
 
-
 setup_logging()
 logger = logging.getLogger(__name__)
 MAX_SPLIT = 1
@@ -628,20 +627,20 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
 
     # Basic Loading
     logger.info("Loading data..")
-    df = pd.read_csv(input_path, nrows=1000000)
+    df = pd.read_csv(input_path)
     logger.info(f"Loaded {len(df)} rows, Features: {len(df.columns)}")
 
     numerical_features, categorical_features, target_column = load_feature_types()
 
     # Utilities
     datasets_dir = "resources/datasets/experiment"
-    os.makedirs(f"results/{attack_category}/local/", exist_ok=True)
+    os.makedirs(f"results/{attack_category}", exist_ok=True)
     os.makedirs(datasets_dir, exist_ok=True)
     config_manager = ConfigManager()
     random.seed(42)
 
     # Define first 5 hosts per traffic
-    hosts = first_n_hosts_per_traffic(df, 2).keys()
+    hosts = first_n_hosts_per_traffic(df, 5).keys()
 
     # Create dataset with Benign and Attack
     df = create_attack_dataset(df, attack_category)
@@ -671,12 +670,12 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
         results_local[host] = copy.deepcopy(template["host"])
 
     results_federated = {}
-    for i in range(2, len(hosts)):
+    for i in range(2, len(hosts)+1):
         template = config_manager.get_section("federated")
         results_federated[f"{i}_hosts"] = copy.deepcopy(template["N_hosts"])
 
     # Start Experiment Iteration
-    random_seeds = [random.randint(1,300) for _ in range(2)]
+    random_seeds = [random.randint(1,300) for _ in range(5)]
     for seed in random_seeds:
         logger.info(f"New Iteration(seed:{seed})")
         # Balance Attack and Benign Proportions
@@ -711,6 +710,13 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
                                                  output_path=output_path)
         logger.info("Done\n")
 
+        logger.info("Merging Validation Combined with Test Combined")
+        new_test_combined = pd.concat([pd.read_csv(training_test_all["validation"]), pd.read_csv(training_test_all["test"])], ignore_index=True)
+        logger.info(f"Rows of new test set: {len(new_test_combined)}")
+        training_test_all["test"] = new_test_combined.to_csv()
+        del new_test_combined
+        logger.info("New Test Set Created")
+
         logger.info("Training and Testing Phase:\n")
         for host, datasets in dict_training_test.items():
             logger.info(f"Training Model Host: {host}")
@@ -727,8 +733,8 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
             # Test Best Model on the host test set
             logger.info("Testing on host test set")
             results = test_local_model(model_path=best_model_path, test_path=datasets["test"], 
-                                       results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test/{model_name}", 
-                                       section=hyperparams, target_column=target_column)
+                                      results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test/{model_name}", 
+                                      section=hyperparams, target_column=target_column)
             logger.info("Testing Done")
             append_results(results_local[host]["test"], results)
             logger.info(f"Results for local test saved correctly\n")
@@ -736,61 +742,72 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
             # Test Best Model on the combined test sets
             logger.info("Testing on the combined test sets")
             results = test_local_model(model_path=best_model_path, test_path=training_test_all["test"], 
-                                                               results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test_combined/{model_name}",
-                                                               section=hyperparams, target_column=target_column)
+                                      results_dir=f"graphs/experiment/{attack_category}/{seed}/local/test_combined/{model_name}",
+                                      section=hyperparams, target_column=target_column)
             logger.info("Testing Done\n")
             append_results(results_local[host]["test_combined"], results)
             logger.info("Results for combined test saved correctly\n")
         
         # FEDERATED
         # Federated Config
+        flower_config = "pyproject.toml"
         save_model_dir = f"saved_models/experiment/{attack_category}/{seed}/federated/"
         log_dir = f"tensorboard_logs/experiment/{attack_category}/{seed}/federated/runs"
         os.makedirs(save_model_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
         federated_config = {}
 
-        partition_ids = str(list(range(len(dict_training_test))))
+        partition_ids = [str(i) for i in range(len(dict_training_test.keys()))]
         partition = dict(zip(partition_ids, dict_training_test.items()))
         federated_config["partition"] = partition
-        federated_config["seed"] = seed
         federated_config["net"] = {
             "hyperparams" : hyperparams,
-            "features_in" : len(training_test_all["train"].columns)
+            "features_in" : len(pd.read_csv(training_test_all["train"]).columns)-1 # Minus Label
         }
 
         logger.info("Federated:")
-        for i in range(2, len(partition_ids)):
+        for i in range(2, len(partition_ids)+1):
             logger.info(f"Current: Federated Model with {i} hosts")
 
             current_log_dir = os.path.join(log_dir, f"{i}_hosts")
-            current_save_model_dir = os.path.join(save_model_dir, f"{i}_hosts/best_model.pth")
+            current_save_model_dir = os.path.join(save_model_dir, f"{i}_hosts")
+            model_name = "best_model.pth"
+            best_model_path = os.path.join(current_save_model_dir, model_name)
             os.makedirs(current_log_dir, exist_ok=True)
             os.makedirs(current_save_model_dir, exist_ok=True)
 
-            federated_config["log_dir"] = current_log_dir
-            federated_config["save_model_dir"] = current_save_model_dir
+            federated_config["utility"] = {
+                                           "seed" : seed,
+                                           "log_dir" : current_log_dir,
+                                           "save_model_dir" : best_model_path
+                                           }
 
             # Save everything to JSON
-            with open(f"config/federated_config.json") as fp:
+            with open(f"config/federated_config.json", "w") as fp:
                 json.dump(federated_config, fp)
 
-            cmd = ["flwr", "run", ".", "--run-config", f"num-supernodes={i}"]
+            # Modify pyproject.toml number of supernodes
+            with open(flower_config, "r") as file:
+                lines = file.readlines()
+
+            for j, line in enumerate(lines):
+                if line.startswith("options.num-supernodes ="):
+                    lines[j] = f"options.num-supernodes = {i}\n"
+
+            with open(flower_config, "w") as file:
+                file.writelines(lines)
+
+            cmd = ["flwr", "run", "."]
             # Run the command and capture output
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, text=True)
 
-            print("STDOUT:")
-            print(result.stdout)
-
-            print("STDERR:")
-            print(result.stderr)
-
-            results = test_local_model(model_path=current_save_model_dir, test_path=training_test_all["test"], 
+            results = test_local_model(model_path=best_model_path, test_path=training_test_all["test"], 
                                                                results_dir=f"graphs/experiment/{attack_category}/{seed}/federated/test_combined/{i}_hosts",
                                                                section=hyperparams, target_column=target_column)
             logger.info("Testing Done\n")
             append_results(results_federated[f"{i}_hosts"]["test_combined"], results)
             logger.info("Results for combined test saved correctly\n")
+            print(results_federated)
 
     results = {
         "local" : results_local,
@@ -798,13 +815,14 @@ def start_test(input_path : str, attack_category : str, hyperparams : str):
     }
 
     for _, models in results.items():
-        for model, tests in models:
+        for _, tests in models.items():
             for _, test_result in tests.items():
                 mean_and_std(test_result)
 
     with open(f"results/{attack_category}/results.json", "w") as fp:
         json.dump(results, fp, indent=4)
 
+    os.makedirs(f"results/{attack_category}/plots", exist_ok=True)
     plot_results(results, output_path=f"results/{attack_category}/plots", metrics=["mean_precision", "mean_recall", "mean_recall", "mean_accuracy"])
 
 if __name__ == "__main__":

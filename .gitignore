@@ -4,7 +4,6 @@ graphs/
 saved_models/
 tensorboard_logs/
 results/
-config/results.json
 config/datasets.json
 
 ### Python ###

@@ -25,13 +25,11 @@ def load_data(partition_id: int):
     config_manager.load_config("config/federated_config.json")
 
     partition = config_manager.get_value(section="partition", key=str(partition_id))
-    seed = config_manager.get_value(key="seed")
-    logger.info(f"Loaded {partition}")
-    logger.info(f"Seed: {seed}")
+    seed = config_manager.get_value(section="utility", key="seed")
 
     # Create CSVDataset to use for DataLoader
-    training_set = CSVDataset(target_column="Label", filepath=partition["train"])
-    validation_set = CSVDataset(target_column="Label", filepath=partition["validation"])
+    training_set = CSVDataset(target_column="Label", filepath=partition[1]["train"])
+    validation_set = CSVDataset(target_column="Label", filepath=partition[1]["validation"])
 
     # Create the dataloaders
     generator = torch.Generator().manual_seed(seed)
@@ -180,7 +178,7 @@ def load_hyperparameters(context : Context):
     config_manager.load_config("config/federated_config.json")
     hyperparams_section = config_manager.get_value(section="net", key="hyperparams") 
     input_dim = config_manager.get_value("net", key="features_in")
-    seed = config_manager.get_value(key="seed")
+    seed = config_manager.get_value(section="utility" , key="seed")
 
     config_manager.load_config("config/model.json")
     layers_size = config_manager.get_value(hyperparams_section, "hidden_layers")
